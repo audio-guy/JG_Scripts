@@ -140,7 +140,7 @@ if #pairs_found > 0 then
 
   local function loop()
     if not open then
-      reaper.ImGui_DestroyContext(ctx)
+      ctx = nil
       if not confirmed then return end  -- user closed window = cancel
       -- proceed to track creation (falls through after defer chain ends)
       return
@@ -185,7 +185,7 @@ if #pairs_found > 0 then
     if open then
       reaper.defer(loop)
     else
-      reaper.ImGui_DestroyContext(ctx)
+      ctx = nil
       if confirmed then
         create_all_tracks()
       end
