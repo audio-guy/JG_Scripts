@@ -1,78 +1,144 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <index version="1" name="JG Scripts">
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  FREE TOOLS                                                -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
   <category name="Tools">
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Color_Items_By_Position.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Color_Items_By_Position.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Color_Items_Vertically.lua" type="script" desc="JG Color Items Vertically">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Color_Items_Vertically.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Color_Items_Vertically.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Convert_Items_To_Tempo_Map.lua" type="script" desc="JG Convert Items To Tempo Map">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Convert_Items_To_Tempo_Map.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Convert_Items_To_Tempo_Map.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Copy_Timecode_To_Clipboard.lua" type="script" desc="JG Copy Timecode To Clipboard">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Copy_Timecode_To_Clipboard.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Copy_Timecode_To_Clipboard.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Group_Color_Manager.lua" type="script" desc="JG Group Color Manager">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Group_Color_Manager.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Group_Color_Manager.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Lua_Code_Runner.lua" type="script" desc="JG Lua Code Runner">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Lua_Code_Runner.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Lua_Code_Runner.lua</source>
       </version>
     </reapack>
 
-    <reapack name="JG_Per_Track_Items_Loudness_Normalize.lua" type="script" desc="JG Per Track Items Loudness Normalize">
+    <reapack name="JG_Per_Track_Items_Loudness_Normalize.lua" type="script" desc="JG Per-Track Items Loudness Normalize">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Per_Track_Items_Loudness_Normalize.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Per_Track_Items_Loudness_Normalize.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Rename_Source_Files_To_Item_Names.lua" type="script" desc="JG Rename Source Files To Item Names">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Rename_Source_Files_To_Item_Names.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Rename_Source_Files_To_Item_Names.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Set_Cursor_To_System_Time.lua" type="script" desc="JG Set Cursor To System Time">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Set_Cursor_To_System_Time.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Set_Cursor_To_System_Time.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Sort_Items_To_Tracks_By_Prefix.lua" type="script" desc="JG Sort Items To Tracks By Prefix">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Sort_Items_To_Tracks_By_Prefix.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Sort_Items_To_Tracks_By_Prefix.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Symmetric_Pan_Selected_Tracks.lua" type="script" desc="JG Symmetric Pan Selected Tracks">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Symmetric_Pan_Selected_Tracks.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Symmetric_Pan_Selected_Tracks.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Transfer_Item_Cuts_Gaps_And_Fades.lua" type="script" desc="JG Transfer Item Cuts Gaps And Fades">
       <version name="1.0.0" author="Julius Gass">
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Tools/main/JG_Transfer_Item_Cuts_Gaps_And_Fades.lua</source>
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Tools/JG_Transfer_Item_Cuts_Gaps_And_Fades.lua</source>
       </version>
     </reapack>
 
   </category>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  PRO – Licensed Scripts                                    -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <category name="Pro">
+
+    <reapack name="JG_Recording_Scheduler.lua" type="script" desc="JG Recording Scheduler">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Pro/JG_Recording_Scheduler.lua</source>
+      </version>
+    </reapack>
+
+    <reapack name="JG_Create_Tracks_From_Clipboard.lua" type="script" desc="JG Create Tracks From Clipboard">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Pro/JG_Create_Tracks_From_Clipboard.lua</source>
+      </version>
+    </reapack>
+
+  </category>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!--  PRO – Behringer Wing Rec Setup (Licensed)                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <category name="Pro/JG_Behringer_Wing_Rec_USB-Module-Card">
+
+    <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card.lua" type="script" desc="JG Behringer Wing to Reaper Rec Setup">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card.lua</source>
+      </version>
+    </reapack>
+
+    <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua" type="script" desc="JG Behringer Wing to Reaper Rec Setup - CONFIG">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua</source>
+      </version>
+    </reapack>
+
+    <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card_get_track_infos.py" type="script" desc="JG Behringer Wing - get track infos (Python helper)">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release]]></changelog>
+        <source>https://raw.githubusercontent.com/audio-guy/jg-s1x7k/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_get_track_infos.py</source>
+      </version>
+    </reapack>
+
+  </category>
+
 </index>
