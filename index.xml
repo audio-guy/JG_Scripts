@@ -99,7 +99,7 @@
 
     <reapack name="JG_Create_Tracks_From_Clipboard.lua" type="script" desc="JG Create Tracks From Clipboard [Pro]">
       <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release – requires license key (dertonmeister.gumroad.com)]]></changelog>
+        <changelog><![CDATA[Initial release – requires license key (jgscripts.gumroad.com)]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Create_Tracks_From_Clipboard.lua</source>
       </version>
     </reapack>
@@ -113,14 +113,14 @@
 
     <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card.lua" type="script" desc="JG Behringer Wing to Reaper Rec Setup [Pro]">
       <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release – requires license key (dertonmeister.gumroad.com)]]></changelog>
+        <changelog><![CDATA[Initial release – requires license key (jgscripts.gumroad.com)]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card.lua</source>
       </version>
     </reapack>
 
     <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua" type="script" desc="JG Behringer Wing to Reaper Rec Setup - CONFIG [Pro]">
       <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release – requires license key (dertonmeister.gumroad.com)]]></changelog>
+        <changelog><![CDATA[Initial release – requires license key (jgscripts.gumroad.com)]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua</source>
       </version>
     </reapack>
