@@ -97,13 +97,6 @@
   <!-- ═══════════════════════════════════════════════════════════ -->
   <category name="Pro">
 
-    <reapack name="JG_Recording_Scheduler.lua" type="script" desc="JG Recording Scheduler [Pro]">
-      <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release – requires license key (juliusgass.gumroad.com)]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG-Scripts/main/Pro/JG_Recording_Scheduler.lua</source>
-      </version>
-    </reapack>
-
     <reapack name="JG_Create_Tracks_From_Clipboard.lua" type="script" desc="JG Create Tracks From Clipboard [Pro]">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release – requires license key (juliusgass.gumroad.com)]]></changelog>
