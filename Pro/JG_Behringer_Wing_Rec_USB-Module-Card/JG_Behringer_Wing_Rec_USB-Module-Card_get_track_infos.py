@@ -120,10 +120,10 @@ def fetch_wing():
         
     for i in range(1, 41):
         for f_str in [str(i), f"{i:02d}"]:
-            addrs1 += [f"/ch/{f_str}/name", f"/ch/{f_str}/col", f"/ch/{f_str}/led", f"/ch/{f_str}/light", f"/ch/{f_str}/in/conn/grp", f"/ch/{f_str}/in/conn/in"]
+            addrs1 += [f"/ch/{f_str}/name", f"/ch/{f_str}/col", f"/ch/{f_str}/led", f"/ch/{f_str}/light", f"/ch/{f_str}/in/conn/grp", f"/ch/{f_str}/in/conn/in", f"/ch/{f_str}/in/conn/altgrp", f"/ch/{f_str}/in/conn/altin"]
     for i in range(1, 9):
         for f_str in [str(i), f"{i:02d}"]:
-            addrs1 += [f"/aux/{f_str}/name", f"/aux/{f_str}/col", f"/aux/{f_str}/led", f"/aux/{f_str}/light", f"/aux/{f_str}/in/conn/grp", f"/aux/{f_str}/in/conn/in"]
+            addrs1 += [f"/aux/{f_str}/name", f"/aux/{f_str}/col", f"/aux/{f_str}/led", f"/aux/{f_str}/light", f"/aux/{f_str}/in/conn/grp", f"/aux/{f_str}/in/conn/in", f"/aux/{f_str}/in/conn/altgrp", f"/aux/{f_str}/in/conn/altin"]
             
     for b in ["main", "bus", "mtx"]:
         count = 4 if b=="main" else (16 if b=="bus" else 8)
@@ -148,6 +148,12 @@ def fetch_wing():
                 n_str = (r1.get(f"/{prefix}/{f_str}/in/conn/in") or "").strip()
                 if raw_g and n_str and raw_g not in ("MAIN", "BUS", "MTX", "CH", "AUX", "OFF"):
                     try: hw_refs.add((raw_g, int(n_str)))
+                    except: pass
+                # Also collect alt source refs
+                alt_g = (r1.get(f"/{prefix}/{f_str}/in/conn/altgrp") or "").strip()
+                alt_n = (r1.get(f"/{prefix}/{f_str}/in/conn/altin") or "").strip()
+                if alt_g and alt_n and alt_g not in ("MAIN", "BUS", "MTX", "CH", "AUX", "OFF"):
+                    try: hw_refs.add((alt_g, int(alt_n)))
                     except: pass
 
     addrs2 = []
@@ -192,6 +198,29 @@ def fetch_wing():
 
     src_to_hw = gather_sources()
     ch_to_hw = gather_channels()
+
+    # Alt source mapping: (hw_grp, hw_in) → (ch_name + " ALT", col, is_off)
+    # Priority: earlier channel wins, main source always wins over alt source
+    def gather_alt_channels():
+        alt_data = {}
+        for prefix, count in [("aux", 8), ("ch", 40)]:
+            for i in range(count, 0, -1):
+                idx_str = f"{i:02d}"
+                c_name = (r.get(f"/{prefix}/{i}/name") or "").strip() or (r.get(f"/{prefix}/{idx_str}/name") or "").strip()
+                c_col = r.get(f"/{prefix}/{i}/col") or r.get(f"/{prefix}/{idx_str}/col") or "0"
+                c_light = str(r.get(f"/{prefix}/{i}/led") or r.get(f"/{prefix}/{idx_str}/led") or r.get(f"/{prefix}/{i}/light") or r.get(f"/{prefix}/{idx_str}/light") or "1")
+
+                a_grp = norm(r.get(f"/{prefix}/{i}/in/conn/altgrp") or r.get(f"/{prefix}/{idx_str}/in/conn/altgrp") or "")
+                a_in = r.get(f"/{prefix}/{i}/in/conn/altin") or r.get(f"/{prefix}/{idx_str}/in/conn/altin") or ""
+
+                try:
+                    idx_in = int(a_in)
+                    if a_grp and a_grp != "OFF":
+                        alt_data[(a_grp, idx_in)] = (c_name, int(c_col), is_off(c_light))
+                except: continue
+        return alt_data
+
+    alt_ch_to_hw = gather_alt_channels()
 
     tracks = []
     for s in range(1, OUT_COUNT + 1):
@@ -261,6 +290,7 @@ def fetch_wing():
             
             if is_direct_ch and ch_direct_name: ch_str = ch_direct_name
             elif hw_key in ch_to_hw and ch_to_hw[hw_key][0]: ch_str = ch_to_hw[hw_key][0]
+            elif hw_key in alt_ch_to_hw and alt_ch_to_hw[hw_key][0]: ch_str = alt_ch_to_hw[hw_key][0] + " ALT"
             
             if hw_key in src_to_hw and src_to_hw[hw_key][0]: src_str = src_to_hw[hw_key][0]
             hw_str = f"{hw_grp} {hw_in}"
@@ -270,6 +300,11 @@ def fetch_wing():
                     name, col, force_uncolored = ch_direct_name, ch_direct_col, ch_direct_off
                 elif hw_key in ch_to_hw: 
                     name, col, force_uncolored = ch_to_hw[hw_key]
+                elif hw_key in alt_ch_to_hw:
+                    alt_name, alt_col, alt_off = alt_ch_to_hw[hw_key]
+                    name = (alt_name + " ALT") if alt_name else ""
+                    col = alt_col
+                    force_uncolored = alt_off
             elif NAME_MODE == "SRC":
                 if hw_key in src_to_hw:
                     name, col, _ = src_to_hw[hw_key]

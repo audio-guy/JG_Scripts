@@ -116,6 +116,10 @@
         <changelog><![CDATA[Initial release – requires license key (jgscripts.gumroad.com)]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card.lua</source>
       </version>
+      <version name="2.0.0" author="Julius Gass">
+        <changelog><![CDATA[Alternative Sources: tracks from alt inputs now get channel name + "ALT" suffix (Channel naming mode)]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua" type="script" desc="JG Behringer Wing to Reaper Rec Setup - CONFIG [Pro]">
@@ -123,11 +127,19 @@
         <changelog><![CDATA[Initial release – requires license key (jgscripts.gumroad.com)]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua</source>
       </version>
+      <version name="2.0.0" author="Julius Gass">
+        <changelog><![CDATA[Alternative Sources support]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_CONFIG.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Behringer_Wing_Rec_USB-Module-Card_get_track_infos.py" type="script" desc="JG Behringer Wing - get track infos (Python helper)">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
+        <source>https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_get_track_infos.py</source>
+      </version>
+      <version name="2.0.0" author="Julius Gass">
+        <changelog><![CDATA[Alternative Sources: alt inputs are now queried via OSC and mapped to tracks with "ALT" suffix]]></changelog>
         <source>https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Pro/JG_Behringer_Wing_Rec_USB-Module-Card/JG_Behringer_Wing_Rec_USB-Module-Card_get_track_infos.py</source>
       </version>
     </reapack>
