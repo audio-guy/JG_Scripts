@@ -109,6 +109,10 @@
         <changelog><![CDATA[Initial release]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="1.0.1" author="Julius Gass">
+        <changelog><![CDATA[Embed JSON library directly (fix ReaPack install)]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>
