@@ -117,6 +117,10 @@
         <changelog><![CDATA[Fix ImGui_PushFont missing font size argument]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Fix color picker (was using wrong format), auto-coloring, English UI, case-insensitive aliases]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>

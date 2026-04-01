@@ -1,14 +1,14 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 1.0.0
+-- @version 1.1.0
 -- @about
 --   Context-aware track coloring system. Two-level architecture:
 --   top-level rules (flat pattern-to-color) plus modules (folder-bound
 --   rule sets with alias matching and parent filters).
---   ReaImGui GUI for editing, manual trigger for coloring.
+--   ReaImGui GUI for editing. Auto-colors tracks on changes.
 
 --------------------------------------------------------------------------------
--- Section 1: Dependencies & Constants
+-- JSON (embedded minimal encoder/decoder)
 --------------------------------------------------------------------------------
 
 local json = (function()
@@ -222,6 +222,10 @@ local json = (function()
   return json
 end)()
 
+--------------------------------------------------------------------------------
+-- Constants & ImGui Setup
+--------------------------------------------------------------------------------
+
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -230,18 +234,30 @@ local MODULE_ORDER_FILE = DATA_DIR .. "/module_order.json"
 
 local WINDOW_W, WINDOW_H = 800, 600
 local LEFT_PANE_W = 200
+local AUTO_COLOR_INTERVAL = 0.3 -- seconds between auto-color checks
 
 local ctx = reaper.ImGui_CreateContext('Track Auto Color')
 local font = reaper.ImGui_CreateFont('sans-serif', 14)
 reaper.ImGui_Attach(ctx, font)
 
 local MATCH_MODES = { "contains", "starts_with", "ends_with", "exact" }
-local MATCH_LABELS = { "Enthält", "Beginnt mit", "Endet mit", "Exakt" }
+local MATCH_LABELS = { "Contains", "Starts with", "Ends with", "Exact" }
 
 --------------------------------------------------------------------------------
--- Section 2: Color Helpers
+-- Color Helpers
 --------------------------------------------------------------------------------
 
+-- Hex string <-> 0xRRGGBB integer (for ImGui ColorEdit3)
+local function hex_to_int(hex)
+  hex = hex:gsub('#', '')
+  return tonumber(hex, 16) or 0x808080
+end
+
+local function int_to_hex(n)
+  return string.format("#%02X%02X%02X", (n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF)
+end
+
+-- Hex string <-> REAPER native color
 local function hex_to_native(hex)
   hex = hex:gsub('#', '')
   local r = tonumber(hex:sub(1, 2), 16) or 0
@@ -255,24 +271,8 @@ local function native_to_hex(n)
   return string.format("#%02X%02X%02X", r, g, b)
 end
 
-local function hex_to_imgui(hex)
-  hex = hex:gsub('#', '')
-  local r = (tonumber(hex:sub(1, 2), 16) or 0) / 255
-  local g = (tonumber(hex:sub(3, 4), 16) or 0) / 255
-  local b = (tonumber(hex:sub(5, 6), 16) or 0) / 255
-  return reaper.ImGui_ColorConvertDouble4ToU32(r, g, b, 1.0)
-end
-
-local function imgui_to_hex(col)
-  local r, g, b = reaper.ImGui_ColorConvertU32ToDouble4(col)
-  return string.format("#%02X%02X%02X",
-    math.floor(r * 255 + 0.5),
-    math.floor(g * 255 + 0.5),
-    math.floor(b * 255 + 0.5))
-end
-
 --------------------------------------------------------------------------------
--- Section 3: Data Layer
+-- Data Layer
 --------------------------------------------------------------------------------
 
 local state = {
@@ -283,6 +283,8 @@ local state = {
   selected_module_idx = 1,
   status_msg = "",
   status_time = 0,
+  last_fingerprint = "",
+  auto_color = true,
 }
 
 local function set_status(msg)
@@ -349,7 +351,6 @@ local function load_module_order()
 end
 
 local function save_module_order()
-  -- Build order from current modules list
   local order = {}
   for _, mod in ipairs(state.modules) do
     order[#order + 1] = slugify(mod.name) .. ".json"
@@ -361,7 +362,6 @@ local function load_module(filename)
   local path = MODULES_DIR .. "/" .. filename
   local data = load_json_file(path)
   if not data then return nil end
-  -- Ensure required fields
   data.name = data.name or filename:gsub('%.json$', '')
   data.folder_aliases = data.folder_aliases or {}
   data.parent_filter = data.parent_filter or {}
@@ -386,7 +386,6 @@ local function load_all_modules()
   local modules = {}
   local loaded_files = {}
 
-  -- Load in order
   for _, filename in ipairs(state.module_order) do
     local mod = load_module(filename)
     if mod then
@@ -395,9 +394,7 @@ local function load_all_modules()
     end
   end
 
-  -- Append any unordered modules alphabetically
   local unordered = {}
-  -- List module directory
   local i = 0
   while true do
     local file = reaper.EnumerateFiles(MODULES_DIR, i)
@@ -432,14 +429,23 @@ local function save_all_data()
 end
 
 --------------------------------------------------------------------------------
--- Section 4: Color Engine
+-- Color Engine
 --------------------------------------------------------------------------------
 
+local function get_track_name(track)
+  local _, name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+  return name
+end
+
+local function is_folder_track(track)
+  return reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH") == 1
+end
+
 local function build_alias_lookup()
-  local lookup = {} -- { ["ALIAS"] = { {idx=order_idx, mod=mod_table}, ... } }
+  local lookup = {}
   for i, mod in ipairs(state.modules) do
     for _, alias in ipairs(mod.folder_aliases) do
-      local key = alias -- case-sensitive
+      local key = alias:upper() -- case-insensitive
       if not lookup[key] then lookup[key] = {} end
       lookup[key][#lookup[key] + 1] = { idx = i, mod = mod }
     end
@@ -447,37 +453,19 @@ local function build_alias_lookup()
   return lookup
 end
 
-local function get_track_name(track)
-  local _, name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
-  return name
-end
-
-local function get_parent_name(track)
-  local parent = reaper.GetParentTrack(track)
-  if not parent then return nil end
-  return get_track_name(parent)
-end
-
-local function is_folder_track(track)
-  return reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH") == 1
-end
-
 local function find_module_for_track(track, alias_lookup)
-  -- Walk parent chain upward, innermost match wins
   local current = track
   while true do
     local parent = reaper.GetParentTrack(current)
     if not parent then return nil end
 
-    local parent_name = get_track_name(parent)
+    local parent_name = get_track_name(parent):upper()
     local candidates = alias_lookup[parent_name]
 
     if candidates and #candidates > 0 then
-      -- Get grandparent name for parent_filter matching
       local grandparent = reaper.GetParentTrack(parent)
-      local grandparent_name = grandparent and get_track_name(grandparent) or nil
+      local grandparent_name = grandparent and get_track_name(grandparent):upper() or nil
 
-      -- Sort candidates: modules with matching parent_filter first, then by order
       local best = nil
       local best_has_filter_match = false
       local best_has_filter = false
@@ -490,19 +478,13 @@ local function find_module_for_track(track, alias_lookup)
 
         if has_filter and grandparent_name then
           for _, pf in ipairs(mod.parent_filter) do
-            if pf == grandparent_name then
+            if pf:upper() == grandparent_name then
               filter_match = true
               break
             end
           end
         end
 
-        -- Selection priority:
-        -- 1. Filter match beats no filter match
-        -- 2. Having a filter (even unmatched) beats no filter (when neither matches)
-        --    Actually per spec: "Modules with parent_filter always beat modules without"
-        --    But only when there IS a filter match among candidates
-        -- 3. Lower index wins within same tier
         local dominated = false
         if best then
           if best_has_filter_match and not filter_match then
@@ -510,17 +492,13 @@ local function find_module_for_track(track, alias_lookup)
           elseif not best_has_filter_match and filter_match then
             dominated = false
           elseif best_has_filter_match and filter_match then
-            -- Both match filter, lower idx wins
             if cand.idx >= best_idx then dominated = true end
           else
-            -- Neither matches filter
-            -- Modules with parent_filter beat those without
             if best_has_filter and not has_filter then
               dominated = true
             elseif not best_has_filter and has_filter then
               dominated = false
             else
-              -- Same tier, lower idx wins
               if cand.idx >= best_idx then dominated = true end
             end
           end
@@ -534,11 +512,7 @@ local function find_module_for_track(track, alias_lookup)
         end
       end
 
-      if best then
-        -- If best has a parent_filter but no match, still return it
-        -- (it matched the alias, filter is for disambiguation)
-        return best
-      end
+      if best then return best end
     end
 
     current = parent
@@ -548,6 +522,7 @@ end
 local function match_rule(track_name, rule)
   local name = track_name:upper()
   local pattern = rule.pattern:upper()
+  if pattern == '' then return false end
   if rule.match_mode == "contains" then
     return string.find(name, pattern, 1, true) ~= nil
   elseif rule.match_mode == "starts_with" then
@@ -558,6 +533,20 @@ local function match_rule(track_name, rule)
     return name == pattern
   end
   return false
+end
+
+-- Build a fingerprint of the current project state to detect changes
+local function build_fingerprint()
+  local parts = {}
+  local track_count = reaper.CountTracks(0)
+  parts[1] = tostring(track_count)
+  for i = 0, track_count - 1 do
+    local track = reaper.GetTrack(0, i)
+    local name = get_track_name(track)
+    local depth = reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH")
+    parts[#parts + 1] = name .. "|" .. depth
+  end
+  return table.concat(parts, "\n")
 end
 
 local function run_engine()
@@ -585,16 +574,14 @@ local function run_engine()
     if current_color ~= 0 and current_color ~= last_applied then
       skipped_user = skipped_user + 1
     else
-      -- Find module context
       local mod = find_module_for_track(track, alias_lookup)
       local rules = mod and mod.rules or state.top_level.rules
       local resolved_color = nil
 
-      -- Match against rules (first match wins)
       for _, rule in ipairs(rules) do
         if match_rule(track_name, rule) then
           if is_folder and rule.apply_to_children_only then
-            -- Skip this rule for folder tracks, continue checking
+            -- skip rule for folder tracks
           else
             resolved_color = rule.color
             break
@@ -602,13 +589,13 @@ local function run_engine()
         end
       end
 
-      -- If no rule match and in module context, use folder_color for folder tracks
+      -- Folder color fallback for module context
       if not resolved_color and mod and is_folder
          and mod.folder_color and mod.folder_color ~= "" then
         resolved_color = mod.folder_color
       end
 
-      -- If still no match, inherit from parent
+      -- Inherit from parent
       if not resolved_color then
         local parent = reaper.GetParentTrack(track)
         while parent do
@@ -640,31 +627,45 @@ local function run_engine()
   reaper.UpdateArrange()
   reaper.Undo_EndBlock("Track Auto Color", -1)
 
-  -- Status message
-  local parts = { colored .. " eingefärbt" }
+  local parts = { colored .. " colored" }
   if skipped_user > 0 then
-    parts[#parts + 1] = skipped_user .. " übersprungen (manuell)"
+    parts[#parts + 1] = skipped_user .. " skipped (manual)"
   end
   if no_match > 0 then
-    parts[#parts + 1] = no_match .. " ohne Treffer"
+    parts[#parts + 1] = no_match .. " no match"
   end
   local msg = table.concat(parts, ", ")
 
-  -- Append unmatched folder names
   local folder_names = {}
   for name in pairs(unmatched_folders) do
     folder_names[#folder_names + 1] = name
   end
   if #folder_names > 0 then
     table.sort(folder_names)
-    msg = msg .. " | Ordner ohne Farbe: " .. table.concat(folder_names, ", ")
+    msg = msg .. " | Unmatched folders: " .. table.concat(folder_names, ", ")
   end
 
   set_status(msg)
 end
 
+-- Check for changes and auto-color if needed
+local last_auto_check = 0
+local function auto_color_check()
+  local now = reaper.time_precise()
+  if now - last_auto_check < AUTO_COLOR_INTERVAL then return end
+  last_auto_check = now
+
+  if not state.auto_color then return end
+
+  local fp = build_fingerprint()
+  if fp ~= state.last_fingerprint then
+    state.last_fingerprint = fp
+    run_engine()
+  end
+end
+
 --------------------------------------------------------------------------------
--- Section 5: GUI Helpers
+-- GUI Helpers
 --------------------------------------------------------------------------------
 
 local function new_rule()
@@ -678,28 +679,25 @@ local function match_mode_index(mode)
   return 1
 end
 
--- Draw a single rule row. Returns true if the rule was deleted.
 local function draw_rule_row(rules, idx, prefix)
   local rule = rules[idx]
-  local id = prefix .. "_" .. idx
   local deleted = false
 
-  reaper.ImGui_PushID(ctx, id)
+  reaper.ImGui_PushID(ctx, prefix .. "_" .. idx)
 
-  -- Pattern input
+  -- Pattern
   reaper.ImGui_SetNextItemWidth(ctx, 180)
   local changed, new_pat = reaper.ImGui_InputText(ctx, '##pat', rule.pattern)
   if changed then rule.pattern = new_pat; state.dirty = true end
 
   reaper.ImGui_SameLine(ctx)
 
-  -- Match mode combo
+  -- Match mode
   reaper.ImGui_SetNextItemWidth(ctx, 110)
   local mode_idx = match_mode_index(rule.match_mode)
   if reaper.ImGui_BeginCombo(ctx, '##mode', MATCH_LABELS[mode_idx]) then
     for i, label in ipairs(MATCH_LABELS) do
-      local selected = (i == mode_idx)
-      if reaper.ImGui_Selectable(ctx, label, selected) then
+      if reaper.ImGui_Selectable(ctx, label, i == mode_idx) then
         rule.match_mode = MATCH_MODES[i]
         state.dirty = true
       end
@@ -709,19 +707,19 @@ local function draw_rule_row(rules, idx, prefix)
 
   reaper.ImGui_SameLine(ctx)
 
-  -- Color picker
-  local col = hex_to_imgui(rule.color)
+  -- Color (0xRRGGBB for ColorEdit3)
+  local col = hex_to_int(rule.color)
   local col_changed, new_col = reaper.ImGui_ColorEdit3(ctx, '##col', col,
     reaper.ImGui_ColorEditFlags_NoInputs())
   if col_changed then
-    rule.color = imgui_to_hex(new_col)
+    rule.color = int_to_hex(new_col)
     state.dirty = true
   end
 
   reaper.ImGui_SameLine(ctx)
 
-  -- Children only checkbox
-  local chk_changed, chk_val = reaper.ImGui_Checkbox(ctx, 'Nur Kinder##chk', rule.apply_to_children_only)
+  -- Skip folders checkbox
+  local chk_changed, chk_val = reaper.ImGui_Checkbox(ctx, 'Skip folders', rule.apply_to_children_only)
   if chk_changed then
     rule.apply_to_children_only = chk_val
     state.dirty = true
@@ -736,19 +734,19 @@ local function draw_rule_row(rules, idx, prefix)
       state.dirty = true
     end
   else
-    reaper.ImGui_InvisibleButton(ctx, '##up_placeholder', 20, 1)
+    reaper.ImGui_InvisibleButton(ctx, '##up_ph', 20, 1)
   end
 
   reaper.ImGui_SameLine(ctx)
 
   -- Move down
   if idx < #rules then
-    if reaper.ImGui_SmallButton(ctx, 'v##down') then
+    if reaper.ImGui_SmallButton(ctx, 'v##dn') then
       rules[idx], rules[idx + 1] = rules[idx + 1], rules[idx]
       state.dirty = true
     end
   else
-    reaper.ImGui_InvisibleButton(ctx, '##down_placeholder', 20, 1)
+    reaper.ImGui_InvisibleButton(ctx, '##dn_ph', 20, 1)
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -764,13 +762,22 @@ local function draw_rule_row(rules, idx, prefix)
 end
 
 --------------------------------------------------------------------------------
--- Section 6: GUI Tabs
+-- GUI Tabs
 --------------------------------------------------------------------------------
 
 local function draw_top_bar()
-  if reaper.ImGui_Button(ctx, 'Tracks einfärben', 160, 28) then
+  -- Auto-color toggle
+  local ac_changed, ac_val = reaper.ImGui_Checkbox(ctx, 'Auto', state.auto_color)
+  if ac_changed then state.auto_color = ac_val end
+
+  reaper.ImGui_SameLine(ctx)
+
+  -- Manual trigger
+  if reaper.ImGui_Button(ctx, 'Color tracks now', 130, 24) then
+    state.last_fingerprint = "" -- force re-run
     run_engine()
   end
+
   reaper.ImGui_SameLine(ctx)
 
   -- Status message (auto-clears after 5s)
@@ -784,15 +791,13 @@ local function draw_top_bar()
 end
 
 local function draw_tab_top_level()
-  -- Header
   reaper.ImGui_Text(ctx, 'Pattern')
   reaper.ImGui_SameLine(ctx, 190)
   reaper.ImGui_Text(ctx, 'Match')
   reaper.ImGui_SameLine(ctx, 310)
-  reaper.ImGui_Text(ctx, 'Farbe')
+  reaper.ImGui_Text(ctx, 'Color')
   reaper.ImGui_Separator(ctx)
 
-  -- Rules
   local rules = state.top_level.rules
   local to_delete = nil
   for i = 1, #rules do
@@ -800,24 +805,22 @@ local function draw_tab_top_level()
       to_delete = i
     end
   end
-  if to_delete then
-    table.remove(rules, to_delete)
-  end
+  if to_delete then table.remove(rules, to_delete) end
 
   reaper.ImGui_Separator(ctx)
-  if reaper.ImGui_Button(ctx, '+ Neue Regel##tl') then
+  if reaper.ImGui_Button(ctx, '+ Add rule##tl') then
     rules[#rules + 1] = new_rule()
     state.dirty = true
   end
 end
 
 local function get_alias_conflicts()
-  -- Check for aliases used by multiple modules
   local alias_mods = {}
   for _, mod in ipairs(state.modules) do
     for _, alias in ipairs(mod.folder_aliases) do
-      if not alias_mods[alias] then alias_mods[alias] = {} end
-      alias_mods[alias][#alias_mods[alias] + 1] = mod.name
+      local key = alias:upper()
+      if not alias_mods[key] then alias_mods[key] = {} end
+      alias_mods[key][#alias_mods[key] + 1] = mod.name
     end
   end
   local conflicts = {}
@@ -833,9 +836,7 @@ local function parse_comma_list(str)
   local result = {}
   for item in str:gmatch('[^,]+') do
     local trimmed = item:match('^%s*(.-)%s*$')
-    if trimmed ~= '' then
-      result[#result + 1] = trimmed
-    end
+    if trimmed ~= '' then result[#result + 1] = trimmed end
   end
   return result
 end
@@ -850,14 +851,13 @@ local function draw_tab_modules()
   local btn_h = 30
   local right_w = avail_w - LEFT_PANE_W - 16
 
-  -- Left pane wrapper (list + buttons)
+  -- Left pane
   if reaper.ImGui_BeginChild(ctx, '##mod_left', LEFT_PANE_W, avail_h) then
-    -- Module list
     if reaper.ImGui_BeginChild(ctx, '##mod_list', LEFT_PANE_W, avail_h - btn_h - 8, reaper.ImGui_ChildFlags_Borders()) then
       for i, mod in ipairs(state.modules) do
         local has_conflict = false
         for _, alias in ipairs(mod.folder_aliases) do
-          if conflicts[alias] then has_conflict = true; break end
+          if conflicts[alias:upper()] then has_conflict = true; break end
         end
 
         local label = mod.name
@@ -870,16 +870,14 @@ local function draw_tab_modules()
       reaper.ImGui_EndChild(ctx)
     end
 
-    -- Module list buttons
     if reaper.ImGui_Button(ctx, '+##newmod') then
-      local mod = {
-        name = "Neues Modul",
+      state.modules[#state.modules + 1] = {
+        name = "New Module",
         folder_aliases = {},
         parent_filter = {},
         folder_color = "",
         rules = {},
       }
-      state.modules[#state.modules + 1] = mod
       state.selected_module_idx = #state.modules
       state.dirty = true
     end
@@ -888,9 +886,8 @@ local function draw_tab_modules()
     if reaper.ImGui_Button(ctx, 'Dup.##dupmod') and #state.modules > 0 then
       local src = state.modules[state.selected_module_idx]
       if src then
-        local copy_json = json.encode(src)
-        local copy = json.decode(copy_json)
-        copy.name = src.name .. " (Kopie)"
+        local copy = json.decode(json.encode(src))
+        copy.name = src.name .. " (Copy)"
         state.modules[#state.modules + 1] = copy
         state.selected_module_idx = #state.modules
         state.dirty = true
@@ -919,38 +916,40 @@ local function draw_tab_modules()
     end
     reaper.ImGui_SameLine(ctx)
 
-    if reaper.ImGui_Button(ctx, 'v##moddown') and state.selected_module_idx < #state.modules then
+    if reaper.ImGui_Button(ctx, 'v##moddn') and state.selected_module_idx < #state.modules then
       local idx = state.selected_module_idx
       state.modules[idx], state.modules[idx + 1] = state.modules[idx + 1], state.modules[idx]
       state.selected_module_idx = idx + 1
       state.dirty = true
     end
 
-    reaper.ImGui_EndChild(ctx) -- mod_left
+    reaper.ImGui_EndChild(ctx)
   end
 
-  -- Right pane: module editor
+  -- Right pane
   reaper.ImGui_SameLine(ctx)
 
   if reaper.ImGui_BeginChild(ctx, '##mod_editor', right_w, avail_h, reaper.ImGui_ChildFlags_Borders()) then
     local mod = state.modules[state.selected_module_idx]
     if mod then
-      -- Module name
+      -- Name
       reaper.ImGui_Text(ctx, 'Name:')
       reaper.ImGui_SameLine(ctx)
       reaper.ImGui_SetNextItemWidth(ctx, right_w - 80)
       local name_changed, new_name = reaper.ImGui_InputText(ctx, '##modname', mod.name)
       if name_changed then
-        -- Delete old file before renaming
         delete_module_file(mod)
         mod.name = new_name
         state.dirty = true
       end
 
       -- Aliases
-      reaper.ImGui_Text(ctx, 'Aliase:')
+      reaper.ImGui_Text(ctx, 'Folder aliases:')
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, 'Folder names that activate this module (case-insensitive, comma-separated)')
+      end
       reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, right_w - 80)
+      reaper.ImGui_SetNextItemWidth(ctx, right_w - 130)
       local alias_str = join_comma_list(mod.folder_aliases)
       local alias_changed, new_alias = reaper.ImGui_InputText(ctx, '##aliases', alias_str)
       if alias_changed then
@@ -958,20 +957,24 @@ local function draw_tab_modules()
         state.dirty = true
       end
 
-      -- Show alias conflict warning
+      -- Alias conflict warnings
       for _, alias in ipairs(mod.folder_aliases) do
-        if conflicts[alias] then
-          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0xFF4444FF)
-          reaper.ImGui_Text(ctx, 'Alias-Konflikt: "' .. alias .. '" auch in: '
-            .. table.concat(conflicts[alias], ', '))
+        local key = alias:upper()
+        if conflicts[key] then
+          reaper.ImGui_PushStyleColor(ctx, reaper.ImGui_Col_Text(), 0x4444FFFF)
+          reaper.ImGui_Text(ctx, 'Alias conflict: "' .. alias .. '" also in: '
+            .. table.concat(conflicts[key], ', '))
           reaper.ImGui_PopStyleColor(ctx)
         end
       end
 
       -- Parent filter
-      reaper.ImGui_Text(ctx, 'Parent Filter:')
+      reaper.ImGui_Text(ctx, 'Parent filter:')
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, 'Only use this module when the folder is inside one of these parent folders.\nUsed to disambiguate when the same alias appears in different contexts.')
+      end
       reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_SetNextItemWidth(ctx, right_w - 120)
+      reaper.ImGui_SetNextItemWidth(ctx, right_w - 130)
       local pf_str = join_comma_list(mod.parent_filter)
       local pf_changed, new_pf = reaper.ImGui_InputText(ctx, '##pfilter', pf_str)
       if pf_changed then
@@ -980,89 +983,78 @@ local function draw_tab_modules()
       end
 
       -- Folder color
-      reaper.ImGui_Text(ctx, 'Ordnerfarbe:')
+      reaper.ImGui_Text(ctx, 'Folder color:')
       reaper.ImGui_SameLine(ctx)
 
       local has_folder_color = mod.folder_color ~= nil and mod.folder_color ~= ""
       if has_folder_color then
-        local fc = hex_to_imgui(mod.folder_color)
+        local fc = hex_to_int(mod.folder_color)
         local fc_changed, new_fc = reaper.ImGui_ColorEdit3(ctx, '##foldcol', fc,
           reaper.ImGui_ColorEditFlags_NoInputs())
         if fc_changed then
-          mod.folder_color = imgui_to_hex(new_fc)
+          mod.folder_color = int_to_hex(new_fc)
           state.dirty = true
         end
         reaper.ImGui_SameLine(ctx)
-        if reaper.ImGui_SmallButton(ctx, 'Entfernen##rmfc') then
+        if reaper.ImGui_SmallButton(ctx, 'Clear##rmfc') then
           mod.folder_color = ""
           state.dirty = true
         end
       else
-        if reaper.ImGui_SmallButton(ctx, 'Setzen##setfc') then
+        if reaper.ImGui_SmallButton(ctx, 'Set##setfc') then
           mod.folder_color = "#808080"
           state.dirty = true
         end
       end
 
       reaper.ImGui_Separator(ctx)
-      reaper.ImGui_Text(ctx, 'Regeln:')
+      reaper.ImGui_Text(ctx, 'Rules:')
 
-      -- Rule header
       reaper.ImGui_Text(ctx, 'Pattern')
       reaper.ImGui_SameLine(ctx, 190)
       reaper.ImGui_Text(ctx, 'Match')
       reaper.ImGui_SameLine(ctx, 310)
-      reaper.ImGui_Text(ctx, 'Farbe')
+      reaper.ImGui_Text(ctx, 'Color')
       reaper.ImGui_Separator(ctx)
 
-      -- Rules
       local to_delete = nil
       for i = 1, #mod.rules do
         if draw_rule_row(mod.rules, i, "mr" .. state.selected_module_idx) then
           to_delete = i
         end
       end
-      if to_delete then
-        table.remove(mod.rules, to_delete)
-      end
+      if to_delete then table.remove(mod.rules, to_delete) end
 
-      if reaper.ImGui_Button(ctx, '+ Neue Regel##mr') then
+      if reaper.ImGui_Button(ctx, '+ Add rule##mr') then
         mod.rules[#mod.rules + 1] = new_rule()
         state.dirty = true
       end
     else
-      reaper.ImGui_Text(ctx, 'Kein Modul ausgewählt')
+      reaper.ImGui_Text(ctx, 'No module selected')
     end
     reaper.ImGui_EndChild(ctx)
   end
 end
 
 local function draw_tab_export_import()
-  reaper.ImGui_Text(ctx, 'Export / Import aller Daten als einzelne JSON-Datei.')
+  reaper.ImGui_Text(ctx, 'Export / import all data as a single JSON file.')
   reaper.ImGui_Separator(ctx)
 
-  -- Export
-  if reaper.ImGui_Button(ctx, 'Exportieren', 140, 28) then
-    -- Try JS_Dialog first, fall back to GetUserInputs
+  if reaper.ImGui_Button(ctx, 'Export', 140, 28) then
     local has_js = reaper.APIExists('JS_Dialog_BrowseForSaveFile')
     local export_path
 
     if has_js then
       local retval, path = reaper.JS_Dialog_BrowseForSaveFile(
         'Export Track Auto Color', '', 'track_auto_color_export.json', 'JSON Files\0*.json\0')
-      if retval == 1 and path ~= '' then
-        export_path = path
-      end
+      if retval == 1 and path ~= '' then export_path = path end
     else
       local retval, path = reaper.GetUserInputs(
-        'Export-Pfad', 1, 'Dateipfad:', DATA_DIR .. '/export.json')
-      if retval and path ~= '' then
-        export_path = path
-      end
+        'Export path', 1, 'File path:', DATA_DIR .. '/export.json')
+      if retval and path ~= '' then export_path = path end
     end
 
     if export_path then
-      -- Gather all data
       local export_data = {
         top_level = state.top_level,
         modules = state.modules,
@@ -1072,64 +1064,54 @@ local function draw_tab_export_import()
         export_data.module_order[#export_data.module_order + 1] = slugify(mod.name) .. ".json"
       end
       if save_json_file(export_path, export_data) then
-        set_status("Export erfolgreich: " .. export_path)
+        set_status("Export successful: " .. export_path)
       else
-        set_status("Export fehlgeschlagen!")
+        set_status("Export failed!")
       end
     end
   end
 
   reaper.ImGui_Spacing(ctx)
 
-  -- Import
-  if reaper.ImGui_Button(ctx, 'Importieren', 140, 28) then
+  if reaper.ImGui_Button(ctx, 'Import', 140, 28) then
     local has_js = reaper.APIExists('JS_Dialog_BrowseForOpenFiles')
     local import_path
 
     if has_js then
       local retval, path = reaper.JS_Dialog_BrowseForOpenFiles(
         'Import Track Auto Color', '', '', 'JSON Files\0*.json\0', false)
-      if retval == 1 and path ~= '' then
-        import_path = path
-      end
+      if retval == 1 and path ~= '' then import_path = path end
     else
       local retval, path = reaper.GetUserInputs(
-        'Import-Pfad', 1, 'Dateipfad:', '')
-      if retval and path ~= '' then
-        import_path = path
-      end
+        'Import path', 1, 'File path:', '')
+      if retval and path ~= '' then import_path = path end
     end
 
     if import_path then
       local data = load_json_file(import_path)
       if data then
-        -- Clear existing module files
         for _, mod in ipairs(state.modules) do
           delete_module_file(mod)
         end
-        -- Apply imported data
         if data.top_level and data.top_level.rules then
           state.top_level = data.top_level
         end
-        if data.modules then
-          state.modules = data.modules
-        end
-        if data.module_order then
-          state.module_order = data.module_order
-        end
+        if data.modules then state.modules = data.modules end
+        if data.module_order then state.module_order = data.module_order end
         state.selected_module_idx = 1
         state.dirty = true
         save_all_data()
-        set_status("Import erfolgreich!")
+        state.last_fingerprint = "" -- force re-color
+        set_status("Import successful!")
       else
-        set_status("Import fehlgeschlagen — ungültige Datei")
+        set_status("Import failed — invalid file")
       end
     end
   end
 end
 
 --------------------------------------------------------------------------------
--- Section 7: Main Loop
+-- Main Loop
 --------------------------------------------------------------------------------
 
 local function loop()
@@ -1143,11 +1125,11 @@ local function loop()
     reaper.ImGui_Separator(ctx)
 
     if reaper.ImGui_BeginTabBar(ctx, '##tabs') then
-      if reaper.ImGui_BeginTabItem(ctx, 'Top-Level Regeln') then
+      if reaper.ImGui_BeginTabItem(ctx, 'Top-Level Rules') then
         draw_tab_top_level()
         reaper.ImGui_EndTabItem(ctx)
       end
-      if reaper.ImGui_BeginTabItem(ctx, 'Module') then
+      if reaper.ImGui_BeginTabItem(ctx, 'Modules') then
         draw_tab_modules()
         reaper.ImGui_EndTabItem(ctx)
       end
@@ -1163,13 +1145,17 @@ local function loop()
 
   reaper.ImGui_PopFont(ctx)
 
+  -- Auto-color check runs every frame (internally throttled)
+  auto_color_check()
+
+  -- Save dirty state when rules change, then force re-color
+  if state.dirty then
+    save_all_data()
+    state.last_fingerprint = "" -- force engine re-run on next check
+  end
+
   if open then
     reaper.defer(loop)
-  else
-    -- Save on close
-    if state.dirty then
-      save_all_data()
-    end
   end
 end
 
