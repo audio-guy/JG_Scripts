@@ -817,6 +817,18 @@ end
 -- GUI
 --------------------------------------------------------------------------------
 
+-- Stable UIDs for rules (weak-key table, not serialized)
+local rule_uids = setmetatable({}, { __mode = 'k' })
+local rule_uid_counter = 0
+
+local function get_rule_uid(rule)
+  if not rule_uids[rule] then
+    rule_uid_counter = rule_uid_counter + 1
+    rule_uids[rule] = rule_uid_counter
+  end
+  return rule_uids[rule]
+end
+
 local function new_rule(module_color)
   return { pattern = "", match_mode = "contains", use_module_color = true, color = module_color or "#808080" }
 end
@@ -834,7 +846,7 @@ local function draw_rule_row(rules, idx, prefix, module_color)
   local rule = rules[idx]
   local deleted = false
 
-  reaper.ImGui_PushID(ctx, prefix .. "_" .. idx)
+  reaper.ImGui_PushID(ctx, prefix .. "_uid" .. get_rule_uid(rule))
 
   -- Pattern
   reaper.ImGui_SetNextItemWidth(ctx, 200)
@@ -1214,8 +1226,11 @@ local function draw_modules()
       reaper.ImGui_Text(ctx, 'Color')
       reaper.ImGui_Separator(ctx)
 
-      -- Sort rules alphabetically for display
+      -- Sort rules alphabetically for display (empty patterns stay at bottom)
       table.sort(mod.rules, function(a, b)
+        local a_empty = a.pattern:match('^%s*$') ~= nil
+        local b_empty = b.pattern:match('^%s*$') ~= nil
+        if a_empty ~= b_empty then return b_empty end
         return a.pattern:upper() < b.pattern:upper()
       end)
 
