@@ -837,11 +837,13 @@ local function draw_rule_row(rules, idx, prefix, module_color)
   reaper.ImGui_SameLine(ctx)
 
   -- Color picker: disabled showing module color when M is on
+  local display_hex
   if rule.use_module_color then
     reaper.ImGui_BeginDisabled(ctx)
     reaper.ImGui_ColorEdit3(ctx, '##col', hex_to_int(module_color),
       reaper.ImGui_ColorEditFlags_NoInputs())
     reaper.ImGui_EndDisabled(ctx)
+    display_hex = module_color
   else
     local col = hex_to_int(rule.color)
     local col_changed, new_col = reaper.ImGui_ColorEdit3(ctx, '##col', col,
@@ -850,7 +852,11 @@ local function draw_rule_row(rules, idx, prefix, module_color)
       rule.color = int_to_hex(new_col)
       state.dirty = true
     end
+    display_hex = rule.color
   end
+
+  reaper.ImGui_SameLine(ctx)
+  reaper.ImGui_Text(ctx, string.format("0x%06x", hex_to_int(display_hex)))
 
   reaper.ImGui_SameLine(ctx)
 
@@ -1129,6 +1135,8 @@ local function draw_modules()
         mod.module_color = int_to_hex(mc_new)
         state.dirty = true
       end
+      reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_Text(ctx, string.format("0x%06x", hex_to_int(mod.module_color)))
 
       -- Folder darken slider
       reaper.ImGui_SameLine(ctx, 0, 20)
