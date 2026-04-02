@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.4.3
+-- @version 2.5.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -224,10 +224,37 @@ local json = (function()
 end)()
 
 --------------------------------------------------------------------------------
+-- Background / Toggle Logic
+--------------------------------------------------------------------------------
+
+local _, _, section_id, cmd_id = reaper.get_action_context()
+local EXT_SECTION = "JG_TrackAutoColor"
+
+-- If already running: toggle GUI visibility and exit
+if reaper.GetExtState(EXT_SECTION, "running") == "1" then
+  local vis = reaper.GetExtState(EXT_SECTION, "gui_visible")
+  reaper.SetExtState(EXT_SECTION, "gui_visible", vis == "1" and "0" or "1", false)
+  return
+end
+
+-- Mark as running (non-persistent: cleared on REAPER restart)
+reaper.SetExtState(EXT_SECTION, "running", "1", false)
+reaper.SetExtState(EXT_SECTION, "gui_visible", "1", false)
+
+reaper.SetToggleCommandState(section_id, cmd_id, 1)
+reaper.RefreshToolbar2(section_id, cmd_id)
+
+reaper.atexit(function()
+  reaper.SetExtState(EXT_SECTION, "running", "0", false)
+  reaper.SetToggleCommandState(section_id, cmd_id, 0)
+  reaper.RefreshToolbar2(section_id, cmd_id)
+end)
+
+--------------------------------------------------------------------------------
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.4.3"
+local VERSION = "2.5.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -1210,18 +1237,28 @@ end
 --------------------------------------------------------------------------------
 
 local function loop()
-  reaper.ImGui_PushFont(ctx, font, 14)
-  reaper.ImGui_SetNextWindowSize(ctx, WINDOW_W, WINDOW_H, reaper.ImGui_Cond_FirstUseEver())
+  -- Show GUI only when toggled on
+  local show_gui = reaper.GetExtState(EXT_SECTION, "gui_visible") == "1"
 
-  local visible, open = reaper.ImGui_Begin(ctx, 'Track Auto Color v' .. VERSION, true)
+  if show_gui then
+    reaper.ImGui_PushFont(ctx, font, 14)
+    reaper.ImGui_SetNextWindowSize(ctx, WINDOW_W, WINDOW_H, reaper.ImGui_Cond_FirstUseEver())
 
-  if visible then
-    draw_top_bar()
-    reaper.ImGui_Separator(ctx)
-    draw_modules()
-    reaper.ImGui_End(ctx)
+    local visible, open = reaper.ImGui_Begin(ctx, 'Track Auto Color v' .. VERSION, true)
+
+    if visible then
+      draw_top_bar()
+      reaper.ImGui_Separator(ctx)
+      draw_modules()
+      reaper.ImGui_End(ctx)
+    end
+    reaper.ImGui_PopFont(ctx)
+
+    -- Close button hides GUI, doesn't stop the script
+    if not open then
+      reaper.SetExtState(EXT_SECTION, "gui_visible", "0", false)
+    end
   end
-  reaper.ImGui_PopFont(ctx)
 
   auto_color_check()
 
@@ -1234,9 +1271,7 @@ local function loop()
     save_settings()
   end
 
-  if open then
-    reaper.defer(loop)
-  end
+  reaper.defer(loop)
 end
 
 -- Entry point
