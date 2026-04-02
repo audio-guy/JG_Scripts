@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.4.1
+-- @version 2.4.2
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -227,7 +227,7 @@ end)()
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.4.1"
+local VERSION = "2.4.2"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -282,38 +282,6 @@ local function darken_color(hex, percent)
   return string.format("#%02X%02X%02X", r, g, b)
 end
 
-local function hsl_to_hex(h, s, l)
-  s = s / 100
-  l = l / 100
-  local c = (1 - math.abs(2 * l - 1)) * s
-  local x = c * (1 - math.abs((h / 60) % 2 - 1))
-  local m = l - c / 2
-  local r, g, b
-  if h < 60 then r, g, b = c, x, 0
-  elseif h < 120 then r, g, b = x, c, 0
-  elseif h < 180 then r, g, b = 0, c, x
-  elseif h < 240 then r, g, b = 0, x, c
-  elseif h < 300 then r, g, b = x, 0, c
-  else r, g, b = c, 0, x end
-  r = math.floor((r + m) * 255)
-  g = math.floor((g + m) * 255)
-  b = math.floor((b + m) * 255)
-  return string.format("#%02X%02X%02X", r, g, b)
-end
-
--- Deterministic color from track name (DJB2 hash → HSL with good visibility)
-local function hash_to_color(name)
-  local hash = 5381
-  for i = 1, #name do
-    hash = ((hash << 5) + hash) + name:byte(i)
-    hash = hash & 0xFFFFFFFF
-  end
-  local h = hash % 360
-  local s = 50 + (hash % 30)
-  local l = 35 + ((hash >> 8) % 20)
-  return hsl_to_hex(h, s, l)
-end
-
 --------------------------------------------------------------------------------
 -- Data Layer
 --------------------------------------------------------------------------------
@@ -342,7 +310,7 @@ end
 local state = {
   modules = {},
   module_order = {},
-  settings = { random_unmatched = false },
+  settings = {},
   dirty = false,
   settings_dirty = false,
   selected_module_idx = 1,
@@ -758,11 +726,6 @@ local function run_engine()
         end
       end
 
-      -- Random color for unmatched tracks
-      if not resolved_color and state.settings.random_unmatched and track_name ~= "" then
-        resolved_color = hash_to_color(track_name)
-      end
-
       if resolved_color then
         -- Store undarkened base color for children to inherit
         reaper.GetSetMediaTrackInfo_String(
@@ -784,7 +747,7 @@ local function run_engine()
       else
         -- Reset tracks that were engine-colored but no longer match
         if last_applied ~= 0 and current_color == last_applied then
-          reaper.SetTrackColor(track, 0)
+          reaper.SetMediaTrackInfo_Value(track, "I_CUSTOMCOLOR", 0)
           reaper.GetSetMediaTrackInfo_String(
             track, "P_EXT:JG_AutoColor_last", "0", true)
         end
@@ -946,20 +909,6 @@ local function draw_top_bar()
   if reaper.ImGui_Button(ctx, 'Color now', 80, 24) then
     state.last_fingerprint = ""
     run_engine()
-  end
-
-  reaper.ImGui_SameLine(ctx)
-
-  -- Random unmatched toggle
-  local ru_changed, ru_val = reaper.ImGui_Checkbox(ctx, 'Random unmatched',
-    state.settings.random_unmatched)
-  if ru_changed then
-    state.settings.random_unmatched = ru_val
-    state.settings_dirty = true
-    state.last_fingerprint = ""
-  end
-  if reaper.ImGui_IsItemHovered(ctx) then
-    reaper.ImGui_SetTooltip(ctx, 'Assign a deterministic random color to tracks with no match')
   end
 
   reaper.ImGui_SameLine(ctx)

@@ -157,6 +157,10 @@
         <changelog><![CDATA[Fix child inheritance: user-colored tracks now reliably pass their color to children. New rules stay at bottom, stable ImGui IDs for empty rules.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.4.2" author="Julius Gass">
+        <changelog><![CDATA[Fix black track bug: use I_CUSTOMCOLOR to properly reset to theme default. Remove random_unmatched option.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>
