@@ -1219,9 +1219,8 @@ local function loop()
     draw_top_bar()
     reaper.ImGui_Separator(ctx)
     draw_modules()
+    reaper.ImGui_End(ctx)
   end
-
-  reaper.ImGui_End(ctx)
   reaper.ImGui_PopFont(ctx)
 
   auto_color_check()
