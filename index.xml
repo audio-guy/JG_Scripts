@@ -129,6 +129,10 @@
         <changelog><![CDATA[Replace case rules with uppercase darkening: UPPERCASE tracks get their resolved color darkened by configurable %. Children inherit the undarkened color.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.0.0" author="Julius Gass">
+        <changelog><![CDATA[Major restructure: remove top-level rules (modules only), remove parent filter, remove tabs (flat UI), comma-separated rule pattern aliases, per-module folder darken slider (replaces fixed folder color), tracks without folder context match all modules in order]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>
