@@ -145,6 +145,10 @@
         <changelog><![CDATA[Show 0xRRGGBB hex code next to color pickers]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.3.0" author="Julius Gass">
+        <changelog><![CDATA[Drag & drop reordering for rules and modules, visible color picker with hex input, Sort A-Z for rules, new rules default to module color, reset track color when moved out of folder]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>

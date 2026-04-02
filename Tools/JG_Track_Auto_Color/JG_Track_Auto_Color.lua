@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.2.0
+-- @version 2.3.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -227,7 +227,7 @@ end)()
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.2.1"
+local VERSION = "2.3.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -752,6 +752,12 @@ local function run_engine()
           track, "P_EXT:JG_AutoColor_last", tostring(native), true)
         colored = colored + 1
       else
+        -- Reset tracks that were engine-colored but no longer match
+        if last_applied ~= 0 and current_color == last_applied then
+          reaper.SetTrackColor(track, 0)
+          reaper.GetSetMediaTrackInfo_String(
+            track, "P_EXT:JG_AutoColor_last", "0", true)
+        end
         no_match = no_match + 1
       end
     end
@@ -784,8 +790,8 @@ end
 -- GUI
 --------------------------------------------------------------------------------
 
-local function new_rule()
-  return { pattern = "", match_mode = "contains", use_module_color = true, color = "#808080" }
+local function new_rule(module_color)
+  return { pattern = "", match_mode = "contains", use_module_color = true, color = module_color or "#808080" }
 end
 
 local function match_mode_index(mode)
@@ -796,14 +802,37 @@ local function match_mode_index(mode)
 end
 
 -- Draw a single rule row. module_color is needed for the "M" preview.
+-- Returns true if the row was deleted.
 local function draw_rule_row(rules, idx, prefix, module_color)
   local rule = rules[idx]
   local deleted = false
 
   reaper.ImGui_PushID(ctx, prefix .. "_" .. idx)
 
+  -- Drag handle
+  reaper.ImGui_Button(ctx, '=', 20, 0)
+  if reaper.ImGui_BeginDragDropSource(ctx) then
+    reaper.ImGui_SetDragDropPayload(ctx, 'RULE_DND', tostring(idx))
+    reaper.ImGui_Text(ctx, rule.pattern ~= '' and rule.pattern or ('rule ' .. idx))
+    reaper.ImGui_EndDragDropSource(ctx)
+  end
+  if reaper.ImGui_BeginDragDropTarget(ctx) then
+    local rv, payload = reaper.ImGui_AcceptDragDropPayload(ctx, 'RULE_DND')
+    if rv then
+      local src = tonumber(payload)
+      if src and src ~= idx then
+        local moved = table.remove(rules, src)
+        table.insert(rules, idx, moved)
+        state.dirty = true
+      end
+    end
+    reaper.ImGui_EndDragDropTarget(ctx)
+  end
+
+  reaper.ImGui_SameLine(ctx)
+
   -- Pattern
-  reaper.ImGui_SetNextItemWidth(ctx, 200)
+  reaper.ImGui_SetNextItemWidth(ctx, 180)
   local changed, new_pat = reaper.ImGui_InputText(ctx, '##pat', rule.pattern)
   if changed then rule.pattern = new_pat; state.dirty = true end
   if reaper.ImGui_IsItemHovered(ctx) then
@@ -836,50 +865,22 @@ local function draw_rule_row(rules, idx, prefix, module_color)
 
   reaper.ImGui_SameLine(ctx)
 
-  -- Color picker: disabled showing module color when M is on
-  local display_hex
+  -- Color picker (full ColorEdit3 with hex display)
   if rule.use_module_color then
     reaper.ImGui_BeginDisabled(ctx)
+    reaper.ImGui_SetNextItemWidth(ctx, 120)
     reaper.ImGui_ColorEdit3(ctx, '##col', hex_to_int(module_color),
-      reaper.ImGui_ColorEditFlags_NoInputs())
+      reaper.ImGui_ColorEditFlags_DisplayHex())
     reaper.ImGui_EndDisabled(ctx)
-    display_hex = module_color
   else
+    reaper.ImGui_SetNextItemWidth(ctx, 120)
     local col = hex_to_int(rule.color)
     local col_changed, new_col = reaper.ImGui_ColorEdit3(ctx, '##col', col,
-      reaper.ImGui_ColorEditFlags_NoInputs())
+      reaper.ImGui_ColorEditFlags_DisplayHex())
     if col_changed then
       rule.color = int_to_hex(new_col)
       state.dirty = true
     end
-    display_hex = rule.color
-  end
-
-  reaper.ImGui_SameLine(ctx)
-  reaper.ImGui_Text(ctx, string.format("0x%06x", hex_to_int(display_hex)))
-
-  reaper.ImGui_SameLine(ctx)
-
-  -- Move up
-  if idx > 1 then
-    if reaper.ImGui_SmallButton(ctx, '^##up') then
-      rules[idx], rules[idx - 1] = rules[idx - 1], rules[idx]
-      state.dirty = true
-    end
-  else
-    reaper.ImGui_InvisibleButton(ctx, '##up_ph', 20, 1)
-  end
-
-  reaper.ImGui_SameLine(ctx)
-
-  -- Move down
-  if idx < #rules then
-    if reaper.ImGui_SmallButton(ctx, 'v##dn') then
-      rules[idx], rules[idx + 1] = rules[idx + 1], rules[idx]
-      state.dirty = true
-    end
-  else
-    reaper.ImGui_InvisibleButton(ctx, '##dn_ph', 20, 1)
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -1048,6 +1049,34 @@ local function draw_modules()
         if reaper.ImGui_Selectable(ctx, label .. '##mod' .. i, i == state.selected_module_idx) then
           state.selected_module_idx = i
         end
+
+        -- Drag source
+        if reaper.ImGui_BeginDragDropSource(ctx) then
+          reaper.ImGui_SetDragDropPayload(ctx, 'MODULE_DND', tostring(i))
+          reaper.ImGui_Text(ctx, mod_name)
+          reaper.ImGui_EndDragDropSource(ctx)
+        end
+
+        -- Drop target
+        if reaper.ImGui_BeginDragDropTarget(ctx) then
+          local rv, payload = reaper.ImGui_AcceptDragDropPayload(ctx, 'MODULE_DND')
+          if rv then
+            local src = tonumber(payload)
+            if src and src ~= i then
+              local selected_mod = state.modules[state.selected_module_idx]
+              local moved = table.remove(state.modules, src)
+              table.insert(state.modules, i, moved)
+              for k, v in ipairs(state.modules) do
+                if v == selected_mod then
+                  state.selected_module_idx = k
+                  break
+                end
+              end
+              state.dirty = true
+            end
+          end
+          reaper.ImGui_EndDragDropTarget(ctx)
+        end
       end
       reaper.ImGui_EndChild(ctx)
     end
@@ -1098,22 +1127,6 @@ local function draw_modules()
         state.dirty = true
       end
     end
-    reaper.ImGui_SameLine(ctx)
-
-    if reaper.ImGui_Button(ctx, '^##modup') and state.selected_module_idx > 1 then
-      local idx = state.selected_module_idx
-      state.modules[idx], state.modules[idx - 1] = state.modules[idx - 1], state.modules[idx]
-      state.selected_module_idx = idx - 1
-      state.dirty = true
-    end
-    reaper.ImGui_SameLine(ctx)
-
-    if reaper.ImGui_Button(ctx, 'v##moddn') and state.selected_module_idx < #state.modules then
-      local idx = state.selected_module_idx
-      state.modules[idx], state.modules[idx + 1] = state.modules[idx + 1], state.modules[idx]
-      state.selected_module_idx = idx + 1
-      state.dirty = true
-    end
 
     reaper.ImGui_EndChild(ctx)
   end
@@ -1128,15 +1141,14 @@ local function draw_modules()
       -- Module color
       reaper.ImGui_Text(ctx, 'Module color:')
       reaper.ImGui_SameLine(ctx)
+      reaper.ImGui_SetNextItemWidth(ctx, 150)
       local mc = hex_to_int(mod.module_color)
       local mc_changed, mc_new = reaper.ImGui_ColorEdit3(ctx, '##modcol', mc,
-        reaper.ImGui_ColorEditFlags_NoInputs())
+        reaper.ImGui_ColorEditFlags_DisplayHex())
       if mc_changed then
         mod.module_color = int_to_hex(mc_new)
         state.dirty = true
       end
-      reaper.ImGui_SameLine(ctx)
-      reaper.ImGui_Text(ctx, string.format("0x%06x", hex_to_int(mod.module_color)))
 
       -- Folder darken slider
       reaper.ImGui_SameLine(ctx, 0, 20)
@@ -1185,15 +1197,17 @@ local function draw_modules()
       reaper.ImGui_Separator(ctx)
 
       -- Rules header
+      reaper.ImGui_Dummy(ctx, 28, 1)
+      reaper.ImGui_SameLine(ctx)
       reaper.ImGui_Text(ctx, 'Pattern')
-      reaper.ImGui_SameLine(ctx, 210)
+      reaper.ImGui_SameLine(ctx, 220)
       reaper.ImGui_Text(ctx, 'Match')
-      reaper.ImGui_SameLine(ctx, 320)
+      reaper.ImGui_SameLine(ctx, 328)
       reaper.ImGui_Text(ctx, 'M')
       if reaper.ImGui_IsItemHovered(ctx) then
         reaper.ImGui_SetTooltip(ctx, 'M = Use module color')
       end
-      reaper.ImGui_SameLine(ctx, 345)
+      reaper.ImGui_SameLine(ctx, 355)
       reaper.ImGui_Text(ctx, 'Color')
       reaper.ImGui_Separator(ctx)
 
@@ -1206,7 +1220,14 @@ local function draw_modules()
       if to_delete then table.remove(mod.rules, to_delete) end
 
       if reaper.ImGui_Button(ctx, '+ Add rule##mr') then
-        mod.rules[#mod.rules + 1] = new_rule()
+        mod.rules[#mod.rules + 1] = new_rule(mod.module_color)
+        state.dirty = true
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, 'Sort A-Z##mr') then
+        table.sort(mod.rules, function(a, b)
+          return a.pattern:upper() < b.pattern:upper()
+        end)
         state.dirty = true
       end
     else
