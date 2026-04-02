@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.4.2
+-- @version 2.4.3
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -227,7 +227,7 @@ end)()
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.4.2"
+local VERSION = "2.4.3"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"

@@ -161,6 +161,10 @@
         <changelog><![CDATA[Fix black track bug: use I_CUSTOMCOLOR to properly reset to theme default. Remove random_unmatched option.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.4.3" author="Julius Gass">
+        <changelog><![CDATA[Fix crash when collapsing window (ImGui_End only when Begin returns true)]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
   </category>
