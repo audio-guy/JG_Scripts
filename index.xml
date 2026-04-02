@@ -171,6 +171,13 @@
       </version>
     </reapack>
 
+    <reapack name="JG_Track_Auto_Color_Toggle_GUI.lua" type="script" desc="JG Track Auto Color - Toggle GUI">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — toggles the GUI of the background Track Auto Color engine]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color_Toggle_GUI.lua</source>
+      </version>
+    </reapack>
+
   </category>
 
   <!-- ═══════════════════════════════════════════════════════════ -->
