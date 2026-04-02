@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.3.0
+-- @version 2.4.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -227,7 +227,7 @@ end)()
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.3.0"
+local VERSION = "2.4.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -603,6 +603,33 @@ local function find_module_as_folder(track_name, alias_lookup)
   return best_candidate(alias_lookup[key])
 end
 
+-- Specificity sort: exact > starts_with/ends_with > contains, then longer pattern wins
+local MATCH_MODE_PRIORITY = { exact = 0, starts_with = 1, ends_with = 1, contains = 2 }
+
+local function get_longest_pattern(rule)
+  local max_len = 0
+  for pat in rule.pattern:gmatch('[^,]+') do
+    pat = pat:match('^%s*(.-)%s*$')
+    if #pat > max_len then max_len = #pat end
+  end
+  return max_len
+end
+
+local function sort_rules_by_specificity(rules)
+  local sorted = {}
+  for i, r in ipairs(rules) do sorted[i] = r end
+  table.sort(sorted, function(a, b)
+    local pa = MATCH_MODE_PRIORITY[a.match_mode] or 2
+    local pb = MATCH_MODE_PRIORITY[b.match_mode] or 2
+    if pa ~= pb then return pa < pb end
+    local la = get_longest_pattern(a)
+    local lb = get_longest_pattern(b)
+    if la ~= lb then return la > lb end
+    return a.pattern:upper() < b.pattern:upper()
+  end)
+  return sorted
+end
+
 -- Match track name against rule; pattern supports comma-separated aliases
 -- All matching is case-insensitive
 local function match_rule(track_name_upper, rule)
@@ -688,17 +715,17 @@ local function run_engine()
       if not is_module_folder then
         local mod = find_module_for_track(track, alias_lookup)
         if mod then
-          -- In module context: match that module's rules
-          for _, rule in ipairs(mod.rules) do
+          -- In module context: match that module's rules (sorted by specificity)
+          for _, rule in ipairs(sort_rules_by_specificity(mod.rules)) do
             if match_rule(track_name_upper, rule) then
               resolved_color = rule.use_module_color and mod.module_color or rule.color
               break
             end
           end
         else
-          -- No module context: iterate all modules' rules in order
+          -- No module context: iterate all modules' rules in order (sorted by specificity)
           for _, m in ipairs(state.modules) do
-            for _, rule in ipairs(m.rules) do
+            for _, rule in ipairs(sort_rules_by_specificity(m.rules)) do
               if match_rule(track_name_upper, rule) then
                 resolved_color = rule.use_module_color and m.module_color or rule.color
                 break
@@ -809,30 +836,8 @@ local function draw_rule_row(rules, idx, prefix, module_color)
 
   reaper.ImGui_PushID(ctx, prefix .. "_" .. idx)
 
-  -- Drag handle
-  reaper.ImGui_Button(ctx, '=', 20, 0)
-  if reaper.ImGui_BeginDragDropSource(ctx) then
-    reaper.ImGui_SetDragDropPayload(ctx, 'RULE_DND', tostring(idx))
-    reaper.ImGui_Text(ctx, rule.pattern ~= '' and rule.pattern or ('rule ' .. idx))
-    reaper.ImGui_EndDragDropSource(ctx)
-  end
-  if reaper.ImGui_BeginDragDropTarget(ctx) then
-    local rv, payload = reaper.ImGui_AcceptDragDropPayload(ctx, 'RULE_DND')
-    if rv then
-      local src = tonumber(payload)
-      if src and src ~= idx then
-        local moved = table.remove(rules, src)
-        table.insert(rules, idx, moved)
-        state.dirty = true
-      end
-    end
-    reaper.ImGui_EndDragDropTarget(ctx)
-  end
-
-  reaper.ImGui_SameLine(ctx)
-
   -- Pattern
-  reaper.ImGui_SetNextItemWidth(ctx, 180)
+  reaper.ImGui_SetNextItemWidth(ctx, 200)
   local changed, new_pat = reaper.ImGui_InputText(ctx, '##pat', rule.pattern)
   if changed then rule.pattern = new_pat; state.dirty = true end
   if reaper.ImGui_IsItemHovered(ctx) then
@@ -1197,19 +1202,22 @@ local function draw_modules()
       reaper.ImGui_Separator(ctx)
 
       -- Rules header
-      reaper.ImGui_Dummy(ctx, 28, 1)
-      reaper.ImGui_SameLine(ctx)
       reaper.ImGui_Text(ctx, 'Pattern')
-      reaper.ImGui_SameLine(ctx, 220)
+      reaper.ImGui_SameLine(ctx, 210)
       reaper.ImGui_Text(ctx, 'Match')
-      reaper.ImGui_SameLine(ctx, 328)
+      reaper.ImGui_SameLine(ctx, 320)
       reaper.ImGui_Text(ctx, 'M')
       if reaper.ImGui_IsItemHovered(ctx) then
         reaper.ImGui_SetTooltip(ctx, 'M = Use module color')
       end
-      reaper.ImGui_SameLine(ctx, 355)
+      reaper.ImGui_SameLine(ctx, 345)
       reaper.ImGui_Text(ctx, 'Color')
       reaper.ImGui_Separator(ctx)
+
+      -- Sort rules alphabetically for display
+      table.sort(mod.rules, function(a, b)
+        return a.pattern:upper() < b.pattern:upper()
+      end)
 
       local to_delete = nil
       for i = 1, #mod.rules do
@@ -1221,13 +1229,6 @@ local function draw_modules()
 
       if reaper.ImGui_Button(ctx, '+ Add rule##mr') then
         mod.rules[#mod.rules + 1] = new_rule(mod.module_color)
-        state.dirty = true
-      end
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, 'Sort A-Z##mr') then
-        table.sort(mod.rules, function(a, b)
-          return a.pattern:upper() < b.pattern:upper()
-        end)
         state.dirty = true
       end
     else
