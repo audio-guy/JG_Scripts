@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.6.0
+-- @version 2.7.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -254,7 +254,7 @@ end)
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.6.0"
+local VERSION = "2.7.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -453,6 +453,7 @@ local function load_module(filename)
   -- Migrate folder_color → module_color
   data.module_color = data.module_color or data.folder_color or "#808080"
   data.folder_darken_percent = data.folder_darken_percent or 0
+  data.alias_match_mode = data.alias_match_mode or "contains"
   data.rules = data.rules or {}
 
   -- Ensure rules have use_module_color
@@ -552,51 +553,58 @@ local function get_track_name(track)
   return name
 end
 
--- Build lookup: uppercase alias → list of {idx, mod}
-local function build_alias_lookup()
-  local lookup = {}
+-- Build alias list: flat list of {alias_upper, match_mode, idx, mod}
+local function build_alias_list()
+  local list = {}
   for i, mod in ipairs(state.modules) do
+    local mode = mod.alias_match_mode or "contains"
     for alias in mod.folder_aliases:gmatch('[^,]+') do
       alias = alias:match('^%s*(.-)%s*$')
       if alias ~= '' then
-        local key = alias:upper()
-        if not lookup[key] then lookup[key] = {} end
-        lookup[key][#lookup[key] + 1] = { idx = i, mod = mod }
+        list[#list + 1] = { alias = alias:upper(), mode = mode, idx = i, mod = mod }
       end
     end
   end
-  return lookup
+  return list
 end
 
--- Pick best candidate: lowest module index wins
-local function best_candidate(candidates)
-  if not candidates or #candidates == 0 then return nil end
-  local best = candidates[1]
-  for _, cand in ipairs(candidates) do
-    if cand.idx < best.idx then best = cand end
+-- Match a folder name against the alias list; returns best module (lowest idx wins)
+local function match_alias(name_upper, alias_list)
+  local best = nil
+  for _, entry in ipairs(alias_list) do
+    local matched = false
+    if entry.mode == "exact" then
+      matched = name_upper == entry.alias
+    elseif entry.mode == "starts_with" then
+      matched = name_upper:sub(1, #entry.alias) == entry.alias
+    elseif entry.mode == "ends_with" then
+      matched = name_upper:sub(-#entry.alias) == entry.alias
+    else -- contains (default)
+      matched = string.find(name_upper, entry.alias, 1, true) ~= nil
+    end
+    if matched then
+      if not best or entry.idx < best.idx then best = entry end
+    end
   end
-  return best.mod
+  return best and best.mod or nil
 end
 
 -- Walk up parent chain; innermost folder alias match wins
-local function find_module_for_track(track, alias_lookup)
+local function find_module_for_track(track, alias_list)
   local current = track
   while true do
     local parent = reaper.GetParentTrack(current)
     if not parent then return nil end
     local parent_name = get_track_name(parent):upper()
-    local candidates = alias_lookup[parent_name]
-    if candidates and #candidates > 0 then
-      return best_candidate(candidates)
-    end
+    local mod = match_alias(parent_name, alias_list)
+    if mod then return mod end
     current = parent
   end
 end
 
 -- Check if a track's own name matches a module alias (for folder coloring)
-local function find_module_as_folder(track_name, alias_lookup)
-  local key = track_name:upper()
-  return best_candidate(alias_lookup[key])
+local function find_module_as_folder(track_name, alias_list)
+  return match_alias(track_name:upper(), alias_list)
 end
 
 -- Specificity sort: exact > starts_with/ends_with > contains, then longer pattern wins
@@ -648,16 +656,16 @@ local function match_rule(track_name_upper, rule)
   return false
 end
 
--- Cached alias lookup (rebuilt when data changes)
-local cached_alias_lookup = nil
+-- Cached alias list (rebuilt when data changes)
+local cached_alias_list = nil
 local cached_alias_dirty = true
 
-local function get_alias_lookup()
-  if not cached_alias_lookup or cached_alias_dirty then
-    cached_alias_lookup = build_alias_lookup()
+local function get_alias_list()
+  if not cached_alias_list or cached_alias_dirty then
+    cached_alias_list = build_alias_list()
     cached_alias_dirty = false
   end
-  return cached_alias_lookup
+  return cached_alias_list
 end
 
 local function run_engine()
@@ -681,8 +689,8 @@ local function run_engine()
     GetSetInfo(track, "P_EXT:JG_AutoColor_base", "", true)
   end
 
-  -- 2. Use cached alias lookup
-  local alias_lookup = get_alias_lookup()
+  -- 2. Use cached alias list
+  local alias_list = get_alias_list()
   local colored = 0
   local skipped_user = 0
   local no_match = 0
@@ -709,36 +717,25 @@ local function run_engine()
 
       -- Check if this track IS a module folder
       if is_folder then
-        local folder_mod = find_module_as_folder(track_name, alias_lookup)
+        local folder_mod = find_module_as_folder(track_name, alias_list)
         if folder_mod then
           is_module_folder = true
           resolved_color = folder_mod.module_color
         end
       end
 
-      -- If not a module folder, match rules
+      -- If not a module folder, match rules within module context only
       if not is_module_folder then
-        local mod = find_module_for_track(track, alias_lookup)
+        local mod = find_module_for_track(track, alias_list)
         if mod then
-          -- In module context: match that module's rules (sorted by specificity)
           for _, rule in ipairs(sort_rules_by_specificity(mod.rules)) do
             if match_rule(track_name_upper, rule) then
               resolved_color = rule.use_module_color and mod.module_color or rule.color
               break
             end
           end
-        else
-          -- No module context: iterate all modules' rules in order (sorted by specificity)
-          for _, m in ipairs(state.modules) do
-            for _, rule in ipairs(sort_rules_by_specificity(m.rules)) do
-              if match_rule(track_name_upper, rule) then
-                resolved_color = rule.use_module_color and m.module_color or rule.color
-                break
-              end
-            end
-            if resolved_color then break end
-          end
         end
+        -- No module context → no coloring (skip)
       end
 
       -- Inherit from parent (use undarkened base color)
@@ -765,7 +762,7 @@ local function run_engine()
 
         -- Module folder darkening
         if is_module_folder then
-          local folder_mod = find_module_as_folder(track_name, alias_lookup)
+          local folder_mod = find_module_as_folder(track_name, alias_list)
           if folder_mod and folder_mod.folder_darken_percent > 0 then
             resolved_color = darken_color(resolved_color, folder_mod.folder_darken_percent)
           end
@@ -1089,6 +1086,7 @@ local function draw_modules()
         folder_aliases = "New Module",
         module_color = "#808080",
         folder_darken_percent = 0,
+        alias_match_mode = "contains",
         rules = {},
       }
       state.selected_module_idx = #state.modules
@@ -1181,6 +1179,27 @@ local function draw_modules()
           'Comma-separated. First entry = module name.\nFolder names that activate this module (case-insensitive).')
       end
       reaper.ImGui_SameLine(ctx)
+
+      -- Alias match mode dropdown
+      local ALIAS_MODES = { "contains", "starts_with", "ends_with", "exact" }
+      local ALIAS_LABELS = { "Contains", "Starts with", "Ends with", "Exact" }
+      local cur_mode = mod.alias_match_mode or "contains"
+      local cur_mode_idx = 1
+      for mi, m in ipairs(ALIAS_MODES) do
+        if m == cur_mode then cur_mode_idx = mi; break end
+      end
+      reaper.ImGui_SetNextItemWidth(ctx, 100)
+      if reaper.ImGui_BeginCombo(ctx, '##aliasmode', ALIAS_LABELS[cur_mode_idx]) then
+        for mi, label in ipairs(ALIAS_LABELS) do
+          if reaper.ImGui_Selectable(ctx, label, mi == cur_mode_idx) then
+            mod.alias_match_mode = ALIAS_MODES[mi]
+            state.dirty = true
+          end
+        end
+        reaper.ImGui_EndCombo(ctx)
+      end
+      reaper.ImGui_SameLine(ctx)
+
       reaper.ImGui_SetNextItemWidth(ctx, -1)
       local alias_changed, new_alias = reaper.ImGui_InputText(ctx, '##aliases', mod.folder_aliases)
       if alias_changed then
