@@ -169,6 +169,10 @@
         <changelog><![CDATA[Background mode: script runs continuously for auto-coloring without GUI. Run action again to toggle GUI. Close window hides GUI but keeps engine running. Works with SWS startup actions.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.5.1" author="Julius Gass">
+        <changelog><![CDATA[Fix invalid ImGui context when toggling GUI back on after background mode. Add Stop button. Lazy context creation.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Track_Auto_Color_Toggle_GUI.lua" type="script" desc="JG Track Auto Color - Toggle GUI">
