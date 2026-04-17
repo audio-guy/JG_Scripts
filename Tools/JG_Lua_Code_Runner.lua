@@ -1,6 +1,6 @@
 -- @description Lua Code Runner
 -- @author JG
--- @version 1.2.0
+-- @version 1.2.1
 -- @about
 --   Interactive Lua code runner for REAPER.
 --   Write or paste Lua code and execute it directly without saving or importing scripts.
@@ -259,12 +259,13 @@ local function loop()
     )
     if pr_changed then prompt_text = pr_new end
 
-    local gen_label = generating and '⏳  Generating...' or '✨  Generate Code'
-    if generating then reaper.ImGui_BeginDisabled(ctx) end
+    local is_generating_now = generating
+    local gen_label = is_generating_now and '⏳  Generating...' or '✨  Generate Code'
+    if is_generating_now then reaper.ImGui_BeginDisabled(ctx) end
     if reaper.ImGui_Button(ctx, gen_label, 180, 28) then
       generate_from_prompt()
     end
-    if generating then reaper.ImGui_EndDisabled(ctx) end
+    if is_generating_now then reaper.ImGui_EndDisabled(ctx) end
     reaper.ImGui_SameLine(ctx)
     if reaper.ImGui_Button(ctx, '🗑  Clear Prompt', 130, 28) then
       prompt_text = ""

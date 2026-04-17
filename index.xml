@@ -42,6 +42,10 @@
     </reapack>
 
     <reapack name="JG_Lua_Code_Runner.lua" type="script" desc="JG Lua Code Runner">
+      <version name="1.2.1" author="Julius Gass">
+        <changelog><![CDATA[Fix ImGui EndDisabled error: generating flag was mutating mid-frame. Snapshot state before Begin/EndDisabled pair.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
+      </version>
       <version name="1.2.0" author="Julius Gass">
         <changelog><![CDATA[Switch Claude integration from Anthropic API to Claude Code CLI (`claude -p`). Runs through your Pro/Max subscription — no API key, no per-token cost. Requires `claude` to be installed and logged in.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
