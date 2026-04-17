@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.7.0
+-- @version 2.8.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -254,7 +254,7 @@ end)
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.7.0"
+local VERSION = "2.8.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -454,6 +454,7 @@ local function load_module(filename)
   data.module_color = data.module_color or data.folder_color or "#808080"
   data.folder_darken_percent = data.folder_darken_percent or 0
   data.alias_match_mode = data.alias_match_mode or "contains"
+  if data.apply_to_standalone == nil then data.apply_to_standalone = false end
   data.rules = data.rules or {}
 
   -- Ensure rules have use_module_color
@@ -634,6 +635,34 @@ local function sort_rules_by_specificity(rules)
   return sorted
 end
 
+-- Collect {rule, mod} entries from all modules with apply_to_standalone=true,
+-- sorted globally by rule specificity (tie-break: module order).
+local function build_standalone_entries()
+  local entries = {}
+  local mod_idx = {}
+  for i, mod in ipairs(state.modules) do
+    mod_idx[mod] = i
+    if mod.apply_to_standalone then
+      for _, rule in ipairs(mod.rules) do
+        entries[#entries + 1] = { rule = rule, mod = mod }
+      end
+    end
+  end
+  table.sort(entries, function(a, b)
+    local pa = MATCH_MODE_PRIORITY[a.rule.match_mode] or 2
+    local pb = MATCH_MODE_PRIORITY[b.rule.match_mode] or 2
+    if pa ~= pb then return pa < pb end
+    local la = get_longest_pattern(a.rule)
+    local lb = get_longest_pattern(b.rule)
+    if la ~= lb then return la > lb end
+    local ia = mod_idx[a.mod] or 0
+    local ib = mod_idx[b.mod] or 0
+    if ia ~= ib then return ia < ib end
+    return a.rule.pattern:upper() < b.rule.pattern:upper()
+  end)
+  return entries
+end
+
 -- Match track name against rule; pattern supports comma-separated aliases
 -- All matching is case-insensitive
 local function match_rule(track_name_upper, rule)
@@ -689,8 +718,9 @@ local function run_engine()
     GetSetInfo(track, "P_EXT:JG_AutoColor_base", "", true)
   end
 
-  -- 2. Use cached alias list
+  -- 2. Use cached alias list + build standalone entries once per run
   local alias_list = get_alias_list()
+  local standalone_entries = build_standalone_entries()
   local colored = 0
   local skipped_user = 0
   local no_match = 0
@@ -724,18 +754,26 @@ local function run_engine()
         end
       end
 
-      -- If not a module folder, match rules within module context only
+      -- If not a module folder, match rules
       if not is_module_folder then
         local mod = find_module_for_track(track, alias_list)
         if mod then
+          -- In module context: match that module's rules (sorted by specificity)
           for _, rule in ipairs(sort_rules_by_specificity(mod.rules)) do
             if match_rule(track_name_upper, rule) then
               resolved_color = rule.use_module_color and mod.module_color or rule.color
               break
             end
           end
+        else
+          -- No module context: only rules from modules with apply_to_standalone=true
+          for _, entry in ipairs(standalone_entries) do
+            if match_rule(track_name_upper, entry.rule) then
+              resolved_color = entry.rule.use_module_color and entry.mod.module_color or entry.rule.color
+              break
+            end
+          end
         end
-        -- No module context → no coloring (skip)
       end
 
       -- Inherit from parent (use undarkened base color)
@@ -1087,6 +1125,7 @@ local function draw_modules()
         module_color = "#808080",
         folder_darken_percent = 0,
         alias_match_mode = "contains",
+        apply_to_standalone = false,
         rules = {},
       }
       state.selected_module_idx = #state.modules
@@ -1170,6 +1209,23 @@ local function draw_modules()
       if fd_changed then
         mod.folder_darken_percent = fd_val
         state.dirty = true
+      end
+
+      -- Apply rules to standalone tracks (no module context) toggle
+      local ats_changed, ats_val = reaper.ImGui_Checkbox(ctx,
+        'Apply rules to tracks without module context',
+        mod.apply_to_standalone)
+      if ats_changed then
+        mod.apply_to_standalone = ats_val
+        state.dirty = true
+      end
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx,
+          'When enabled, this module\'s rules also match tracks that do NOT sit under\n' ..
+          'a folder matching any alias of any module.\n\n' ..
+          'Tracks that DO have a module context are always handled by that module only.\n' ..
+          'If multiple standalone-enabled modules match, the most specific rule wins\n' ..
+          '(exact > starts/ends_with > contains, longer pattern preferred), then module order.')
       end
 
       -- Aliases (first alias = module name)

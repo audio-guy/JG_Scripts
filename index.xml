@@ -189,6 +189,10 @@
         <changelog><![CDATA[Performance: replace fingerprint polling with GetProjectStateChangeCount for instant change detection. Cache alias lookup. Localize REAPER API calls in engine loop. Module delete button next to + with confirmation dialog.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.8.0" author="Julius Gass">
+        <changelog><![CDATA[Per-module opt-in "Apply rules to tracks without module context". Modules can now decide individually whether their rules should color standalone tracks (tracks not under a folder matching any module alias). Tracks with a module context are still handled only by that module. When multiple standalone-enabled modules match, the most specific rule wins (tie-break: module order).]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
       <version name="2.7.0" author="Julius Gass">
         <changelog><![CDATA[Tracks without a module folder context are no longer colored (no cross-module fallback). Folder aliases now support match modes: contains (default), starts_with, ends_with, exact.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
