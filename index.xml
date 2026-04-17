@@ -42,6 +42,10 @@
     </reapack>
 
     <reapack name="JG_Lua_Code_Runner.lua" type="script" desc="JG Lua Code Runner">
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Built-in Claude AI prompt: generate Lua code directly from a natural-language prompt (requires Anthropic API key, stored in ExtState). Async curl request, no UI freeze. Strips markdown fences automatically.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
+      </version>
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
