@@ -1,6 +1,6 @@
 -- @description Create named tracks from clipboard (inc. I/O patch)
 -- @author Julius Gass
--- @version 1.0.0
+-- @version 1.1.0
 -- @about
 --   Creates named tracks from clipboard text (one track name per line).
 --   Automatically detects stereo pairs and lets you confirm via GUI.

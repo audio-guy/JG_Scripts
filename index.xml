@@ -35,8 +35,8 @@
     </reapack>
 
     <reapack name="JG_Create_Tracks_From_Clipboard.lua" type="script" desc="JG Create Tracks From Clipboard">
-      <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release – creates named tracks from clipboard text, detects stereo pairs, optional 1:1 HW routing for Virtual Soundcheck]]></changelog>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Moved from Pro to free Tools – creates named tracks from clipboard text, detects stereo pairs, optional 1:1 HW routing for Virtual Soundcheck]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Create_Tracks_From_Clipboard.lua</source>
       </version>
     </reapack>
