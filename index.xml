@@ -41,6 +41,20 @@
       </version>
     </reapack>
 
+    <reapack name="JG_Goto_Next_Item_Edge.lua" type="script" desc="JG Goto Next Item Edge">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — moves cursor to next item edge on selected tracks (or all tracks if none selected). Back-to-back edges count as one position and select the following item; gaps select the item just ended. View stays centered on cursor.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Goto_Next_Item_Edge.lua</source>
+      </version>
+    </reapack>
+
+    <reapack name="JG_Goto_Previous_Item_Edge.lua" type="script" desc="JG Goto Previous Item Edge">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — moves cursor to previous item edge on selected tracks (or all tracks if none selected). Mirrored logic of "Next": back-to-back edges select the preceding item; gaps select the item just started. View stays centered on cursor.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Goto_Previous_Item_Edge.lua</source>
+      </version>
+    </reapack>
+
     <reapack name="JG_Group_Color_Manager.lua" type="script" desc="JG Group Color Manager">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
