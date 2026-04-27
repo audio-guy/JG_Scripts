@@ -5,10 +5,11 @@
 --   (or all tracks if none are selected). The view stays centered on the
 --   cursor and the view width is preserved.
 --
---   Edge logic (mirrored from "next"):
---     * If an item ends at the edge position, that item is selected
---       (back-to-back items: item A is selected because A ends there).
---     * Otherwise (gap precedes), the item starting at that position is selected.
+--   Edge logic:
+--     * Always prefer the item that STARTS at the edge position
+--       (back-to-back items: item B is selected because B starts there).
+--     * Only if no item starts at the edge (pure end edge with gap following),
+--       the item ending there is selected.
 
 local EPS = 1e-9
 
@@ -80,10 +81,10 @@ if not target then
 end
 
 local sel_item
-if #target.ends > 0 then
-  sel_item = target.ends[1].item
-elseif #target.starts > 0 then
+if #target.starts > 0 then
   sel_item = target.starts[1].item
+elseif #target.ends > 0 then
+  sel_item = target.ends[1].item
 end
 
 reaper.SetEditCurPos(target.pos, false, false)

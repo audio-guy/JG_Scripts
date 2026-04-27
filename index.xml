@@ -53,6 +53,10 @@
         <changelog><![CDATA[Initial release — moves cursor to previous item edge on selected tracks (or all tracks if none selected). Mirrored logic of "Next": back-to-back edges select the preceding item; gaps select the item just started. View stays centered on cursor.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Goto_Previous_Item_Edge.lua</source>
       </version>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Always prefer the item that starts at the edge position (consistent with "Next"). Only fall back to the ending item when no item starts at the edge (pure end edge with gap following).]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Goto_Previous_Item_Edge.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Group_Color_Manager.lua" type="script" desc="JG Group Color Manager">
