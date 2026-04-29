@@ -1,6 +1,6 @@
 -- @description Track Auto Color
 -- @author JG
--- @version 2.8.0
+-- @version 2.9.0
 -- @about
 --   Context-aware track coloring system using modules.
 --   Each module is identified by its aliases (first alias = display name).
@@ -254,7 +254,7 @@ end)
 -- Constants & ImGui Setup
 --------------------------------------------------------------------------------
 
-local VERSION = "2.8.0"
+local VERSION = "2.9.0"
 local RESOURCE_PATH = reaper.GetResourcePath()
 local DATA_DIR = RESOURCE_PATH .. "/Scripts/JG_TrackColor"
 local MODULES_DIR = DATA_DIR .. "/modules"
@@ -454,15 +454,21 @@ local function load_module(filename)
   data.module_color = data.module_color or data.folder_color or "#808080"
   data.folder_darken_percent = data.folder_darken_percent or 0
   data.alias_match_mode = data.alias_match_mode or "contains"
-  if data.apply_to_standalone == nil then data.apply_to_standalone = false end
   data.rules = data.rules or {}
 
-  -- Ensure rules have use_module_color
+  -- Ensure rules have use_module_color, apply_to_standalone, global
+  -- Migration: per-module apply_to_standalone (v2.8) becomes per-rule.
+  -- - Existing rules without per-rule flag inherit the module-level flag (preserves v2.8 behavior).
+  -- - New rules default to apply_to_standalone=true, global=false.
+  local module_level_ats = data.apply_to_standalone == true
+  data.apply_to_standalone = nil  -- drop legacy module-level field
   for _, rule in ipairs(data.rules) do
     if rule.use_module_color == nil then rule.use_module_color = true end
     rule.color = rule.color or "#808080"
     rule.pattern = rule.pattern or ""
     rule.match_mode = rule.match_mode or "contains"
+    if rule.apply_to_standalone == nil then rule.apply_to_standalone = module_level_ats end
+    if rule.global == nil then rule.global = false end
   end
 
   return data
@@ -635,19 +641,8 @@ local function sort_rules_by_specificity(rules)
   return sorted
 end
 
--- Collect {rule, mod} entries from all modules with apply_to_standalone=true,
--- sorted globally by rule specificity (tie-break: module order).
-local function build_standalone_entries()
-  local entries = {}
-  local mod_idx = {}
-  for i, mod in ipairs(state.modules) do
-    mod_idx[mod] = i
-    if mod.apply_to_standalone then
-      for _, rule in ipairs(mod.rules) do
-        entries[#entries + 1] = { rule = rule, mod = mod }
-      end
-    end
-  end
+-- Sort {rule, mod} entries by rule specificity (tie-break: module order, then pattern).
+local function sort_entries_by_specificity(entries, mod_idx)
   table.sort(entries, function(a, b)
     local pa = MATCH_MODE_PRIORITY[a.rule.match_mode] or 2
     local pb = MATCH_MODE_PRIORITY[b.rule.match_mode] or 2
@@ -660,6 +655,39 @@ local function build_standalone_entries()
     if ia ~= ib then return ia < ib end
     return a.rule.pattern:upper() < b.rule.pattern:upper()
   end)
+end
+
+-- Collect {rule, mod} entries from all rules with apply_to_standalone=true,
+-- sorted globally by rule specificity (tie-break: module order).
+local function build_standalone_entries()
+  local entries = {}
+  local mod_idx = {}
+  for i, mod in ipairs(state.modules) do
+    mod_idx[mod] = i
+    for _, rule in ipairs(mod.rules) do
+      if rule.apply_to_standalone then
+        entries[#entries + 1] = { rule = rule, mod = mod }
+      end
+    end
+  end
+  sort_entries_by_specificity(entries, mod_idx)
+  return entries
+end
+
+-- Collect {rule, mod} entries from all rules with global=true.
+-- Used as fall-through for tracks already in a (foreign) module context.
+local function build_global_entries()
+  local entries = {}
+  local mod_idx = {}
+  for i, mod in ipairs(state.modules) do
+    mod_idx[mod] = i
+    for _, rule in ipairs(mod.rules) do
+      if rule.global then
+        entries[#entries + 1] = { rule = rule, mod = mod }
+      end
+    end
+  end
+  sort_entries_by_specificity(entries, mod_idx)
   return entries
 end
 
@@ -718,9 +746,10 @@ local function run_engine()
     GetSetInfo(track, "P_EXT:JG_AutoColor_base", "", true)
   end
 
-  -- 2. Use cached alias list + build standalone entries once per run
+  -- 2. Use cached alias list + build standalone & global entries once per run
   local alias_list = get_alias_list()
   local standalone_entries = build_standalone_entries()
+  local global_entries = build_global_entries()
   local colored = 0
   local skipped_user = 0
   local no_match = 0
@@ -765,8 +794,17 @@ local function run_engine()
               break
             end
           end
+          -- Fall through to global rules from OTHER modules (own module always wins above)
+          if not resolved_color then
+            for _, entry in ipairs(global_entries) do
+              if entry.mod ~= mod and match_rule(track_name_upper, entry.rule) then
+                resolved_color = entry.rule.use_module_color and entry.mod.module_color or entry.rule.color
+                break
+              end
+            end
+          end
         else
-          -- No module context: only rules from modules with apply_to_standalone=true
+          -- No module context: only rules with apply_to_standalone=true
           for _, entry in ipairs(standalone_entries) do
             if match_rule(track_name_upper, entry.rule) then
               resolved_color = entry.rule.use_module_color and entry.mod.module_color or entry.rule.color
@@ -857,7 +895,14 @@ local function get_rule_uid(rule)
 end
 
 local function new_rule(module_color)
-  return { pattern = "", match_mode = "contains", use_module_color = true, color = module_color or "#808080" }
+  return {
+    pattern = "",
+    match_mode = "contains",
+    use_module_color = true,
+    color = module_color or "#808080",
+    apply_to_standalone = true,
+    global = false,
+  }
 end
 
 local function match_mode_index(mode)
@@ -905,6 +950,29 @@ local function draw_rule_row(rules, idx, prefix, module_color)
   if m_changed then rule.use_module_color = m_val; state.dirty = true end
   if reaper.ImGui_IsItemHovered(ctx) then
     reaper.ImGui_SetTooltip(ctx, 'Use module color')
+  end
+
+  reaper.ImGui_SameLine(ctx)
+
+  -- "S" checkbox (apply to standalone tracks)
+  local s_changed, s_val = reaper.ImGui_Checkbox(ctx, 'S##ats', rule.apply_to_standalone)
+  if s_changed then rule.apply_to_standalone = s_val; state.dirty = true end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      'Standalone: apply this rule to tracks that have no module context\n' ..
+      '(no parent folder matching any module alias).')
+  end
+
+  reaper.ImGui_SameLine(ctx)
+
+  -- "G" checkbox (global override across foreign module contexts)
+  local g_changed, g_val = reaper.ImGui_Checkbox(ctx, 'G##glb', rule.global)
+  if g_changed then rule.global = g_val; state.dirty = true end
+  if reaper.ImGui_IsItemHovered(ctx) then
+    reaper.ImGui_SetTooltip(ctx,
+      'Global: apply this rule even inside OTHER modules\' folders.\n' ..
+      'In its own module, normal rule order applies (own module always wins).\n' ..
+      'When the rule matches in a foreign module, the home module\'s color is used.')
   end
 
   reaper.ImGui_SameLine(ctx)
@@ -1125,7 +1193,6 @@ local function draw_modules()
         module_color = "#808080",
         folder_darken_percent = 0,
         alias_match_mode = "contains",
-        apply_to_standalone = false,
         rules = {},
       }
       state.selected_module_idx = #state.modules
@@ -1211,23 +1278,6 @@ local function draw_modules()
         state.dirty = true
       end
 
-      -- Apply rules to standalone tracks (no module context) toggle
-      local ats_changed, ats_val = reaper.ImGui_Checkbox(ctx,
-        'Apply rules to tracks without module context',
-        mod.apply_to_standalone)
-      if ats_changed then
-        mod.apply_to_standalone = ats_val
-        state.dirty = true
-      end
-      if reaper.ImGui_IsItemHovered(ctx) then
-        reaper.ImGui_SetTooltip(ctx,
-          'When enabled, this module\'s rules also match tracks that do NOT sit under\n' ..
-          'a folder matching any alias of any module.\n\n' ..
-          'Tracks that DO have a module context are always handled by that module only.\n' ..
-          'If multiple standalone-enabled modules match, the most specific rule wins\n' ..
-          '(exact > starts/ends_with > contains, longer pattern preferred), then module order.')
-      end
-
       -- Aliases (first alias = module name)
       reaper.ImGui_Text(ctx, 'Aliases:')
       if reaper.ImGui_IsItemHovered(ctx) then
@@ -1289,6 +1339,16 @@ local function draw_modules()
         reaper.ImGui_SetTooltip(ctx, 'M = Use module color')
       end
       reaper.ImGui_SameLine(ctx, 345)
+      reaper.ImGui_Text(ctx, 'S')
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, 'S = Apply to standalone tracks (no module context)')
+      end
+      reaper.ImGui_SameLine(ctx, 370)
+      reaper.ImGui_Text(ctx, 'G')
+      if reaper.ImGui_IsItemHovered(ctx) then
+        reaper.ImGui_SetTooltip(ctx, 'G = Global (apply inside other modules\' folders)')
+      end
+      reaper.ImGui_SameLine(ctx, 395)
       reaper.ImGui_Text(ctx, 'Color')
       reaper.ImGui_Separator(ctx)
 

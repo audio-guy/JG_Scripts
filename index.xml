@@ -226,6 +226,10 @@
         <changelog><![CDATA[Per-module opt-in "Apply rules to tracks without module context". Modules can now decide individually whether their rules should color standalone tracks (tracks not under a folder matching any module alias). Tracks with a module context are still handled only by that module. When multiple standalone-enabled modules match, the most specific rule wins (tie-break: module order).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.9.0" author="Julius Gass">
+        <changelog><![CDATA[Per-rule "S" (Standalone) and "G" (Global) flags replace the module-level Standalone toggle. S (default ON) controls whether a rule colors tracks without module context. G (default OFF) makes a rule override foreign module contexts: e.g. a "Reverb" rule in the FX module marked Global will color a Reverb track inside Drums with the FX color, while still respecting FX's own rules when the track sits in FX. Existing module-level Standalone settings are migrated onto each of that module's rules.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
       <version name="2.7.0" author="Julius Gass">
         <changelog><![CDATA[Tracks without a module folder context are no longer colored (no cross-module fallback). Folder aliases now support match modes: contains (default), starts_with, ends_with, exact.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
