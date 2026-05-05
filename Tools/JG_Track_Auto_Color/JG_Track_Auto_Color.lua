@@ -726,7 +726,6 @@ local function get_alias_list()
 end
 
 local function run_engine()
-  reaper.Undo_BeginBlock()
   reaper.PreventUIRefresh(1)
 
   -- Localize hot-path functions
@@ -863,7 +862,6 @@ local function run_engine()
 
   reaper.PreventUIRefresh(-1)
   reaper.UpdateArrange()
-  reaper.Undo_EndBlock("Track Auto Color", -1)
 
   local parts = { colored .. " colored" }
   if skipped_user > 0 then parts[#parts + 1] = skipped_user .. " skipped (manual)" end
@@ -872,12 +870,48 @@ local function run_engine()
 end
 
 local last_change_count = -1
+local last_fingerprint = ""
+local last_check_time = 0
+
+local function compute_track_fingerprint()
+  local CountTracks = reaper.CountTracks
+  local GetTrack = reaper.GetTrack
+  local GetSetInfo = reaper.GetSetMediaTrackInfo_String
+  local GetInfoVal = reaper.GetMediaTrackInfo_Value
+  local GetTrackColor = reaper.GetTrackColor
+
+  local track_count = CountTracks(0)
+  local parts = { tostring(track_count) }
+  for i = 0, track_count - 1 do
+    local track = GetTrack(0, i)
+    local _, name = GetSetInfo(track, "P_NAME", "", false)
+    local depth = GetInfoVal(track, "I_FOLDERDEPTH")
+    local color = GetTrackColor(track)
+    parts[#parts + 1] = name .. "|" .. depth .. "|" .. color
+  end
+  return table.concat(parts, "\n")
+end
+
 local function auto_color_check()
   if not state.auto_color then return end
+
+  -- Throttle: at most every 100 ms
+  local now = reaper.time_precise()
+  if now - last_check_time < 0.1 then return end
+  last_check_time = now
+
+  -- Cheap state-change gate (skips if nothing in the project changed at all)
   local current_count = reaper.GetProjectStateChangeCount(0)
   if current_count == last_change_count then return end
   last_change_count = current_count
+
+  -- Track-relevant fingerprint gate (skips item edits, fades, selection, …)
+  local fp = compute_track_fingerprint()
+  if fp == last_fingerprint then return end
+
   run_engine()
+  -- Recompute after engine ran so its own color writes don't retrigger us
+  last_fingerprint = compute_track_fingerprint()
 end
 
 --------------------------------------------------------------------------------

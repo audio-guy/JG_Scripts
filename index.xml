@@ -234,6 +234,14 @@
         <changelog><![CDATA[Fix Global rule precedence: global rules from foreign modules now correctly win over the surrounding module's rules. Previously a track like "REV Bongo Snare Ride" inside Drums would match the Drums "Bongo"/"Snare"/"Ride" rules before falling through to the global REV rule. Own-module rules are still untouched (global rules from the home module are excluded from the override pass).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
       </version>
+      <version name="2.9.2" author="Julius Gass">
+        <changelog><![CDATA[No more undo points: remove Undo_BeginBlock/EndBlock around the engine. Auto coloring no longer floods the undo history with "Track Auto Color" entries on every item edit, fade or selection change.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
+      <version name="2.9.3" author="Julius Gass">
+        <changelog><![CDATA[Performance: 2-stage gate + 100 ms throttle. Engine now only runs when track structure actually changes (count, names, folder depth, colors). Item trim, fades, selection changes etc. no longer trigger a full color pass.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
+      </version>
       <version name="2.7.0" author="Julius Gass">
         <changelog><![CDATA[Tracks without a module folder context are no longer colored (no cross-module fallback). Folder aliases now support match modes: contains (default), starts_with, ends_with, exact.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Track_Auto_Color/JG_Track_Auto_Color.lua</source>
