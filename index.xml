@@ -74,25 +74,6 @@
       </version>
     </reapack>
 
-    <reapack name="JG_Lua_Code_Runner.lua" type="script" desc="JG Lua Code Runner">
-      <version name="1.2.1" author="Julius Gass">
-        <changelog><![CDATA[Fix ImGui EndDisabled error: generating flag was mutating mid-frame. Snapshot state before Begin/EndDisabled pair.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
-      </version>
-      <version name="1.2.0" author="Julius Gass">
-        <changelog><![CDATA[Switch Claude integration from Anthropic API to Claude Code CLI (`claude -p`). Runs through your Pro/Max subscription — no API key, no per-token cost. Requires `claude` to be installed and logged in.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
-      </version>
-      <version name="1.1.0" author="Julius Gass">
-        <changelog><![CDATA[Built-in Claude AI prompt: generate Lua code directly from a natural-language prompt (requires Anthropic API key, stored in ExtState). Async curl request, no UI freeze. Strips markdown fences automatically.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
-      </version>
-      <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Lua_Code_Runner.lua</source>
-      </version>
-    </reapack>
-
     <reapack name="JG_Per_Track_Items_Loudness_Normalize.lua" type="script" desc="JG Per-Track Items Loudness Normalize">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
