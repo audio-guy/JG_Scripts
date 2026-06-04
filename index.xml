@@ -83,6 +83,10 @@
         <changelog><![CDATA[Stretched label text (IMGRESOURCEFLAGS), doubled track height (60px), English track name "Score Measures", black track/item colour (white text in the default theme; switch LABEL_COLOR to white if your theme draws dark text).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
       </version>
+      <version name="1.2.0" author="Julius Gass">
+        <changelog><![CDATA[Tint =NN anchor markers (default red) on each run so renumbering / repeat points are visible at a glance. Configurable via COLOR_ANCHORS / ANCHOR_COLOR.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Per_Track_Items_Loudness_Normalize.lua" type="script" desc="JG Per-Track Items Loudness Normalize">

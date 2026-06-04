@@ -1,11 +1,12 @@
 -- @description Label score measures (printed measure numbers as locked items)
 -- @author JG
--- @version 1.1.0
+-- @version 1.2.0
 -- @about
 --   Creates one empty, beat-locked item per measure on a dedicated, pinned
 --   track ("Score Measures"), labelled with the *printed* score measure number.
 --   Between two anchors the number counts +1 per measure; an anchor restarts
---   the numbering.
+--   the numbering. Anchor markers are tinted (default red) so you can see at a
+--   glance where the numbering restarts (e.g. at repeats).
 --
 --   SET AN ANCHOR = add a normal project marker named "=NN", e.g.:
 --       =789   -> the measure containing this marker is printed measure 789,
@@ -33,6 +34,8 @@ local COLOR_LABELS       = true              -- colour track + items
 local LABEL_COLOR        = { 0, 0, 0 }       -- RGB. Black -> white text in the default
                                              -- theme. If your theme draws dark text,
                                              -- set this to { 255, 255, 255 }.
+local COLOR_ANCHORS      = true              -- tint =NN markers so renumbering points stand out
+local ANCHOR_COLOR       = { 255, 60, 60 }   -- RGB for the =NN anchor markers
 local proj = 0
 
 local function nativeColor(rgb)
@@ -54,12 +57,15 @@ end
 local anchors = {}
 local i = 0
 while true do
-  local retval, isrgn, pos, _, name = reaper.EnumProjectMarkers(i)
+  local retval, isrgn, pos, rgnend, name, markidx = reaper.EnumProjectMarkers3(proj, i)
   if retval == 0 then break end
   if not isrgn then
     local num = name:match(ANCHOR_PATTERN)
     if num then
-      anchors[#anchors + 1] = { mi = measureIndexAt(pos), printed = tonumber(num) }
+      anchors[#anchors + 1] = {
+        mi = measureIndexAt(pos), printed = tonumber(num),
+        markidx = markidx, pos = pos, rgnend = rgnend, name = name,
+      }
     end
   end
   i = i + 1
@@ -126,6 +132,16 @@ reaper.PreventUIRefresh(1)
 local track   = findOrCreateTrack(LABEL_TRACK_NAME)
 local projLen = reaper.GetProjectLength(proj)
 local color   = COLOR_LABELS and nativeColor(LABEL_COLOR) or nil
+
+-- tint anchor markers so renumbering / repeat points are visible
+if COLOR_ANCHORS then
+  local ac = nativeColor(ANCHOR_COLOR)
+  for _, a in ipairs(anchors) do
+    if a.markidx then
+      reaper.SetProjectMarker3(proj, a.markidx, false, a.pos, a.rgnend, a.name, ac)
+    end
+  end
+end
 
 -- remove old labels
 for it = reaper.CountTrackMediaItems(track) - 1, 0, -1 do
