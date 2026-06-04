@@ -76,7 +76,11 @@
 
     <reapack name="JG_Label_Score_Measures.lua" type="script" desc="JG Label Score Measures">
       <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release — one empty, beat-locked item per measure on a pinned, height-locked "Partiturtakte" track, labelled with the printed score measure number. Anchors via markers named "=NN" restart the numbering; without anchors timeline measure 1 = printed measure 1.]]></changelog>
+        <changelog><![CDATA[Initial release — one empty, beat-locked item per measure on a pinned, height-locked track, labelled with the printed score measure number. Anchors via markers named "=NN" restart the numbering; without anchors timeline measure 1 = printed measure 1.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
+      </version>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Stretched label text (IMGRESOURCEFLAGS), doubled track height (60px), English track name "Score Measures", black track/item colour (white text in the default theme; switch LABEL_COLOR to white if your theme draws dark text).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
       </version>
     </reapack>
