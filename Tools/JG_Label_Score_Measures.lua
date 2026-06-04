@@ -1,6 +1,6 @@
 -- @description Label score measures (printed measure numbers as locked items)
 -- @author JG
--- @version 1.2.0
+-- @version 1.3.0
 -- @about
 --   Creates one empty, beat-locked item per measure on a dedicated, pinned
 --   track ("Score Measures"), labelled with the *printed* score measure number.
@@ -13,7 +13,8 @@
 --                 then +1 per measure until the next anchor.
 --   Any number of anchors is allowed. Place the marker on the measure downbeat
 --   (slightly off-grid markers are rounded to the nearest measure start).
---   Without any anchor: timeline measure 1 = printed measure 1.
+--   Without any anchor the printed number follows REAPER's displayed bar
+--   numbers, so the project "start measure offset" setting is respected.
 --
 --   The label items use the "beats (position + length)" timebase so they follow
 --   tempo-map edits, their text is stretched to fill the item, and the track is
@@ -31,9 +32,9 @@ local LOCK_HEIGHT        = true              -- fixed, locked track height
 local LABEL_TRACK_HEIGHT = 60                -- px (only used when LOCK_HEIGHT)
 local STRETCH_TEXT       = true              -- stretch label text to fill the item
 local COLOR_LABELS       = true              -- colour track + items
-local LABEL_COLOR        = { 0, 0, 0 }       -- RGB. Black -> white text in the default
-                                             -- theme. If your theme draws dark text,
-                                             -- set this to { 255, 255, 255 }.
+local LABEL_COLOR        = { 255, 255, 255 } -- RGB. White keeps the dark default item
+                                             -- text readable. Use { 0, 0, 0 } only if
+                                             -- your theme auto-contrasts to white text.
 local COLOR_ANCHORS      = true              -- tint =NN markers so renumbering points stand out
 local ANCHOR_COLOR       = { 255, 60, 60 }   -- RGB for the =NN anchor markers
 local proj = 0
@@ -52,6 +53,16 @@ local function measureIndexAt(pos)
   local tNext  = reaper.TimeMap2_beatsToTime(proj, 0.0, mi + 1)
   if pos > (tStart + tNext) * 0.5 then mi = mi + 1 end
   return mi
+end
+
+-- Bar number REAPER *displays* at the downbeat of measure index m. Uses the same
+-- formatter as the ruler/transport, which honours the project "start measure
+-- offset" setting (there is no direct API getter for that offset).
+local function displayedBar(m)
+  local t = reaper.TimeMap2_beatsToTime(proj, 0.0, m) + 1e-6
+  local s = reaper.format_timestr_pos(t, "", 2)   -- "<bar>.<beat>.<frac>"
+  local bar = s:match("^%s*(-?%d+)")
+  return tonumber(bar) or (m + 1)
 end
 
 local anchors = {}
@@ -74,7 +85,7 @@ end
 -- Base anchor: timeline measure 1 (index 0) = printed measure 1, unless overridden
 local hasZero = false
 for _, a in ipairs(anchors) do if a.mi == 0 then hasZero = true end end
-if not hasZero then anchors[#anchors + 1] = { mi = 0, printed = 1 } end
+if not hasZero then anchors[#anchors + 1] = { mi = 0, printed = displayedBar(0) } end
 table.sort(anchors, function(a, b) return a.mi < b.mi end)
 
 local function printedFor(m)

@@ -87,6 +87,10 @@
         <changelog><![CDATA[Tint =NN anchor markers (default red) on each run so renumbering / repeat points are visible at a glance. Configurable via COLOR_ANCHORS / ANCHOR_COLOR.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
       </version>
+      <version name="1.3.0" author="Julius Gass">
+        <changelog><![CDATA[Respect the project "start measure offset" setting: default (un-anchored) numbering now follows REAPER's displayed bar numbers via format_timestr_pos. Default label colour changed to white so the dark default item text stays readable.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Label_Score_Measures.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Per_Track_Items_Loudness_Normalize.lua" type="script" desc="JG Per-Track Items Loudness Normalize">
