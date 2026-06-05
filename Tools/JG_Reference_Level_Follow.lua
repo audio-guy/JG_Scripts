@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.2.2
+-- @version 1.2.3
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -407,7 +407,7 @@ local function writeEnvelopes(destTracks, times, g, t0, t1)
   local sel = saveTrackSelection()
   r.PreventUIRefresh(1)
   r.Undo_BeginBlock()
-  local written = 0
+  local written, failed = 0, {}
   local n = #g
   for _, tr in ipairs(destTracks) do
     -- pick the target envelope and the dB -> envelope-value mapping for this mode
@@ -440,13 +440,16 @@ local function writeEnvelopes(destTracks, times, g, t0, t1)
       if n > 1 then put(n) end
       r.Envelope_SortPoints(env)
       written = written + 1
+    else
+      local _, nm = r.GetTrackName(tr)
+      failed[#failed + 1] = nm
     end
   end
   r.Undo_EndBlock("Reference Level Follow: write envelopes", -1)
   r.PreventUIRefresh(-1)
   restoreTrackSelection(sel)
   r.UpdateArrange()
-  return written
+  return written, failed
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -463,9 +466,15 @@ local function runAnalyzeWrite()
   local times, loud = ensureAnalysis(srcs, t0, t1, prefs.srcMode)
   if #loud == 0 then state.status = "No audio found in range."; return end
   local g, anchor = deriveGain(times, loud)
-  local written = writeEnvelopes(dests, times, g, t0, t1)
-  state.status = string.format("Done: %d blocks, anchor %.1f LUFS, %d/%d destination(s) written.",
-                               #loud, anchor, written, #dests)
+  local written, failed = writeEnvelopes(dests, times, g, t0, t1)
+  if #failed > 0 then
+    local stage = (prefs.dstMode == "jsfx") and "gain-JSFX" or "Pre-FX volume"
+    state.status = string.format("Wrote %d/%d. Could not create the %s envelope on: %s",
+                                 written, #dests, stage, table.concat(failed, ", "))
+  else
+    state.status = string.format("Done: %d blocks, anchor %.1f LUFS, %d destination(s) written.",
+                                 #loud, anchor, written)
+  end
 end
 
 local function runClear()

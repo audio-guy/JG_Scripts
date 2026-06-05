@@ -121,6 +121,10 @@
         <changelog><![CDATA[Gain JSFX mode now reuses the existing JG Ride Gain instance by scanning the FX chain by name (any position) instead of relying on AddByName query semantics — re-syncing updates the same plugin instead of risking a duplicate, and you can move it anywhere in the chain (e.g. before a reverb) and it keeps working.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
       </version>
+      <version name="1.2.3" author="Julius Gass">
+        <changelog><![CDATA[Status line now reports per-destination failures explicitly (e.g. "Could not create the gain-JSFX envelope on: <track>") so an empty result is diagnosable instead of silent.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Rename_Source_Files_To_Item_Names.lua" type="script" desc="JG Rename Source Files To Item Names">
