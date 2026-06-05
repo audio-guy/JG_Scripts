@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.1.0
+-- @version 1.2.0
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -11,17 +11,21 @@
 --
 --   The ride is centred on the reference's median loudness (= 0 dB), so the
 --   destinations' static fader level is preserved on average; only deviations
---   are followed. The ride lives on the *Pre-FX volume* envelope, leaving your
---   main fader untouched as the static level.
+--   are followed. The ride is applied on a separate stage (Pre-FX volume or a
+--   gain JSFX at the end of the chain), leaving your main fader untouched.
 --
 --   GUI:
 --     Sources       - reference track(s) to follow (summed if several)
 --     Destinations  - track(s) to write the ride envelope onto
+--     Source tap    - Item (raw) / Track post-FX / Post-fader (incl. source
+--                     volume automation) to measure the reference from
+--     Apply on dest - Pre-FX volume envelope, or a self-contained gain JSFX at
+--                     the end of the chain (leaves the volume envelope free)
 --     Follow amount - how steeply the ride tracks the reference (slope/depth)
 --     Inertia       - smoothing time; higher = slower, more "organic"
 --     Ride range    - hard floor/ceiling (lower/upper dB limits) for the ride
 --   If a time selection exists, only that range is analysed/written.
---   During a reference rest (silence) the ride follows down to Max cut.
+--   During a reference rest (silence) the ride follows down to the lower limit.
 --
 --   Requires the js_ReaScriptAPI-independent ReaImGui extension (ReaPack).
 
@@ -43,7 +47,8 @@ local SILENCE_LUFS = -70          -- below this a block counts as a rest
 local POINT_DELTA  = 0.05         -- dB change needed to emit a new envelope point
 
 local cfg   = { sources = {}, dests = {} }            -- track GUIDs (per project)
-local prefs = { depth = 50, inertia = 2.0, lowerLimit = -12, upperLimit = 6 } -- global
+local prefs = { depth = 50, inertia = 2.0, lowerLimit = -12, upperLimit = 6,
+                srcMode = "item", dstMode = "prefx" } -- global
 local cache = { key = nil, times = nil, loud = nil }  -- analysis cache
 local state = { status = "Pick sources + destinations, then Analyze & Write." }
 local prefsDirty = false
@@ -74,6 +79,8 @@ local function savePrefs()
   r.SetExtState(EXT, "inertia",  tostring(prefs.inertia),  true)
   r.SetExtState(EXT, "lower", tostring(prefs.lowerLimit), true)
   r.SetExtState(EXT, "upper", tostring(prefs.upperLimit), true)
+  r.SetExtState(EXT, "srcmode", prefs.srcMode, true)
+  r.SetExtState(EXT, "dstmode", prefs.dstMode, true)
 end
 
 local function loadPrefs()
@@ -84,6 +91,8 @@ local function loadPrefs()
   local oldC = tonumber(r.GetExtState(EXT, "maxcut"))
   prefs.lowerLimit = tonumber(r.GetExtState(EXT, "lower")) or (oldC and -oldC) or prefs.lowerLimit
   prefs.upperLimit = tonumber(r.GetExtState(EXT, "upper")) or oldB or prefs.upperLimit
+  local sm = r.GetExtState(EXT, "srcmode"); if sm ~= "" then prefs.srcMode = sm end
+  local dm = r.GetExtState(EXT, "dstmode"); if dm ~= "" then prefs.dstMode = dm end
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -139,6 +148,37 @@ local function getPreFXVolEnv(track)
   return r.GetTrackEnvelopeByChunkName(track, "<VOLENV")
 end
 
+-- Self-contained gain JSFX (written to the resource path on first use), so the
+-- ride can sit at the end of the FX chain without a ReaPack dependency.
+local RIDE_JSFX_NAME = "JG_RideGain"
+local RIDE_JSFX_LO, RIDE_JSFX_HI = -24, 12   -- must match slider1 range below
+
+local function ensureRideJSFX()
+  local path = r.GetResourcePath() .. "/Effects/" .. RIDE_JSFX_NAME
+  local fh = io.open(path, "r")
+  if fh then fh:close(); return RIDE_JSFX_NAME end
+  fh = io.open(path, "w")
+  if not fh then return nil end
+  fh:write(
+    "desc:JG Ride Gain\n" ..
+    "slider1:0<-24,12,0.001>Ride gain (dB)\n" ..
+    "@init\ng = 10^(slider1/20);\n" ..
+    "@slider\ng = 10^(slider1/20);\n" ..
+    "@sample\nspl0 *= g; spl1 *= g;\n")
+  fh:close()
+  return RIDE_JSFX_NAME
+end
+
+-- Find (or add at end of chain) the gain JSFX and return its param-0 envelope.
+local function getGainParamEnv(track)
+  local name = ensureRideJSFX()
+  if not name then return nil end
+  local fx = r.TrackFX_AddByName(track, name, false, -1)
+  if fx < 0 then fx = r.TrackFX_AddByName(track, name, false, 1) end
+  if fx < 0 then return nil end
+  return r.GetFXEnvelope(track, fx, 0, true)
+end
+
 -- Analysis time range: time selection if set, else union of source content.
 local function getRange(srcTracks)
   local s, e = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
@@ -189,7 +229,7 @@ local function kweight_coeffs(sr)
 end
 
 -- Returns time[] (project sec) and loud[] (LUFS) per 100 ms block of the source sum.
-local function analyze(srcTracks, t0, t1)
+local function analyze(srcTracks, t0, t1, srcMode)
   local sr  = ANALYSIS_SR
   local hs, hp = kweight_coeffs(sr)
   local hs0,hs1,hs2,ha1,ha2 = hs[1],hs[2],hs[3],hs[4],hs[5]
@@ -203,6 +243,15 @@ local function analyze(srcTracks, t0, t1)
   local LOG10 = 0.4342944819032518
   local CH    = 2
   local CHUNK = 65536
+
+  -- Item (raw): bypass each source track's FX chain while reading.
+  local fxSaved = {}
+  if srcMode == "item" then
+    for k, tr in ipairs(srcTracks) do
+      fxSaved[k] = r.GetMediaTrackInfo_Value(tr, "I_FXEN")
+      r.SetMediaTrackInfo_Value(tr, "I_FXEN", 0)
+    end
+  end
 
   local accs, bufs = {}, {}
   for k, tr in ipairs(srcTracks) do
@@ -258,15 +307,36 @@ local function analyze(srcTracks, t0, t1)
   end
 
   for k = 1, nsrc do r.DestroyAudioAccessor(accs[k]) end
+
+  if srcMode == "item" then
+    for k, tr in ipairs(srcTracks) do
+      r.SetMediaTrackInfo_Value(tr, "I_FXEN", fxSaved[k] or 1)
+    end
+  end
+
+  -- Post-fader: fold in the source's time-varying volume automation (the static
+  -- fader cancels via the median). Exact for a single source track.
+  if srcMode == "postfader" and srcTracks[1] then
+    local env = r.GetTrackEnvelopeByName(srcTracks[1], "Volume")
+    if env then
+      local scaling = r.GetEnvelopeScalingMode(env)
+      for i = 1, #loud do
+        local _, v = r.Envelope_Evaluate(env, times[i], 44100, 1)
+        local lin = r.ScaleFromEnvelopeMode(scaling, v)
+        if lin and lin > 1e-9 then loud[i] = loud[i] + 20 * math.log(lin) * LOG10 end
+      end
+    end
+  end
+
   return times, loud
 end
 
-local function ensureAnalysis(srcTracks, t0, t1)
-  local key = ""
+local function ensureAnalysis(srcTracks, t0, t1, srcMode)
+  local key = srcMode .. "|"
   for _, tr in ipairs(srcTracks) do key = key .. r.GetTrackGUID(tr) end
   key = key .. string.format("|%.3f|%.3f|%d", t0, t1, ANALYSIS_SR)
   if cache.key == key and cache.times then return cache.times, cache.loud end
-  local times, loud = analyze(srcTracks, t0, t1)
+  local times, loud = analyze(srcTracks, t0, t1, srcMode)
   cache.key, cache.times, cache.loud = key, times, loud
   return times, loud
 end
@@ -324,26 +394,37 @@ local function writeEnvelopes(destTracks, times, g, t0, t1)
   r.PreventUIRefresh(1)
   r.Undo_BeginBlock()
   local written = 0
+  local n = #g
+  local jsfxSpan = RIDE_JSFX_HI - RIDE_JSFX_LO
   for _, tr in ipairs(destTracks) do
-    local env = getPreFXVolEnv(tr)
-    if env then
-      local scaling = r.GetEnvelopeScalingMode(env)
-      r.DeleteEnvelopePointRange(env, t0 - 0.0011, t1 + 0.0011)
-      local n = #g
-      if n > 0 then
-        local function put(i)
-          local v = r.ScaleToEnvelopeMode(scaling, 10 ^ (g[i] / 20))
-          r.InsertEnvelopePoint(env, times[i], v, 0, 0, false, true)
-        end
-        put(1)
-        local lastDb = g[1]
-        for i = 2, n - 1 do
-          if math.abs(g[i] - lastDb) >= POINT_DELTA then put(i); lastDb = g[i] end
-        end
-        if n > 1 then put(n) end
-        r.Envelope_SortPoints(env)
-        written = written + 1
+    -- pick the target envelope and the dB -> envelope-value mapping for this mode
+    local env, toValue
+    if prefs.dstMode == "jsfx" then
+      env = getGainParamEnv(tr)
+      toValue = function(db)
+        local v = (db - RIDE_JSFX_LO) / jsfxSpan
+        if v < 0 then v = 0 elseif v > 1 then v = 1 end
+        return v
       end
+    else
+      env = getPreFXVolEnv(tr)
+      if env then
+        local scaling = r.GetEnvelopeScalingMode(env)
+        toValue = function(db) return r.ScaleToEnvelopeMode(scaling, 10 ^ (db / 20)) end
+      end
+    end
+
+    if env and toValue and n > 0 then
+      r.DeleteEnvelopePointRange(env, t0 - 0.0011, t1 + 0.0011)
+      local function put(i) r.InsertEnvelopePoint(env, times[i], toValue(g[i]), 0, 0, false, true) end
+      put(1)
+      local lastDb = g[1]
+      for i = 2, n - 1 do
+        if math.abs(g[i] - lastDb) >= POINT_DELTA then put(i); lastDb = g[i] end
+      end
+      if n > 1 then put(n) end
+      r.Envelope_SortPoints(env)
+      written = written + 1
     end
   end
   r.Undo_EndBlock("Reference Level Follow: write envelopes", -1)
@@ -364,7 +445,7 @@ local function runAnalyzeWrite()
   local t0, t1 = getRange(srcs)
   if t1 <= t0 then state.status = "Empty analysis range."; return end
 
-  local times, loud = ensureAnalysis(srcs, t0, t1)
+  local times, loud = ensureAnalysis(srcs, t0, t1, prefs.srcMode)
   if #loud == 0 then state.status = "No audio found in range."; return end
   local g, anchor = deriveGain(times, loud)
   local written = writeEnvelopes(dests, times, g, t0, t1)
@@ -379,7 +460,14 @@ local function runClear()
   local t0, t1 = getRange(#srcs > 0 and srcs or dests)
   r.Undo_BeginBlock()
   for _, tr in ipairs(dests) do
-    local env = r.GetTrackEnvelopeByChunkName(tr, "<VOLENV")
+    local env
+    if prefs.dstMode == "jsfx" then
+      local name = ensureRideJSFX()
+      local fx = name and r.TrackFX_AddByName(tr, name, false, 0) or -1
+      if fx and fx >= 0 then env = r.GetFXEnvelope(tr, fx, 0, false) end
+    else
+      env = r.GetTrackEnvelopeByChunkName(tr, "<VOLENV")
+    end
     if env then
       r.DeleteEnvelopePointRange(env, t0 - 0.0011, t1 + 0.0011)
       r.Envelope_SortPoints(env)
@@ -387,7 +475,7 @@ local function runClear()
   end
   r.Undo_EndBlock("Reference Level Follow: clear envelopes", -1)
   r.UpdateArrange()
-  state.status = "Cleared Pre-FX volume envelope in range on destination(s)."
+  state.status = "Cleared ride envelope in range on destination(s)."
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -414,6 +502,29 @@ local function drawGUI()
 
   r.ImGui_Separator(ctx)
 
+  -- Source tap point
+  local function srcRadio(label, mode)
+    if r.ImGui_RadioButton(ctx, label, prefs.srcMode == mode) then
+      if prefs.srcMode ~= mode then prefs.srcMode = mode; cache.key = nil; prefsDirty = true end
+    end
+  end
+  r.ImGui_Text(ctx, "Source tap:"); r.ImGui_SameLine(ctx)
+  srcRadio("Item (raw)", "item");      r.ImGui_SameLine(ctx)
+  srcRadio("Track post-FX", "prefader"); r.ImGui_SameLine(ctx)
+  srcRadio("Post-fader", "postfader")
+
+  -- Destination apply point
+  local function dstRadio(label, mode)
+    if r.ImGui_RadioButton(ctx, label, prefs.dstMode == mode) then
+      if prefs.dstMode ~= mode then prefs.dstMode = mode; prefsDirty = true end
+    end
+  end
+  r.ImGui_Text(ctx, "Apply on dest:"); r.ImGui_SameLine(ctx)
+  dstRadio("Pre-FX volume", "prefx");  r.ImGui_SameLine(ctx)
+  dstRadio("Gain JSFX (end)", "jsfx")
+
+  r.ImGui_Separator(ctx)
+
   local ch
   ch, prefs.depth   = r.ImGui_SliderDouble(ctx, "Follow amount", prefs.depth,   0, 100, "%.0f %%")
   if ch then prefsDirty = true end
@@ -437,15 +548,15 @@ local function drawGUI()
   r.ImGui_Text(ctx, state.status)
   r.ImGui_Spacing(ctx)
   r.ImGui_TextWrapped(ctx,
-    "Ride is written to the Pre-FX volume envelope, centred on the reference's " ..
-    "median loudness (0 dB). First analysis reads the audio (window may freeze " ..
-    "briefly); changing sliders and re-writing is instant. Set a time selection " ..
-    "to limit the range.")
+    "Ride is centred on the reference's median loudness (0 dB) and written to the " ..
+    "chosen destination stage. First analysis reads the audio (window may freeze " ..
+    "briefly); changing sliders/limits and re-writing is instant. Set a time " ..
+    "selection to limit the range.")
 end
 
 local function loop()
   r.ImGui_PushFont(ctx, font, 14)
-  r.ImGui_SetNextWindowSize(ctx, 480, 380, r.ImGui_Cond_FirstUseEver())
+  r.ImGui_SetNextWindowSize(ctx, 540, 470, r.ImGui_Cond_FirstUseEver())
   local visible, open = r.ImGui_Begin(ctx, "JG Reference Level Follow", true)
   if visible then
     drawGUI()

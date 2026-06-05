@@ -109,6 +109,10 @@
         <changelog><![CDATA[Replace the separate Max boost / Max cut sliders with a single intuitive "Ride range (dB)" two-handle range (lower/upper limit, right = more level). Add an inline explanation of Follow amount (slope) vs the range limits. Old maxboost/maxcut settings migrate automatically.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
       </version>
+      <version name="1.2.0" author="Julius Gass">
+        <changelog><![CDATA[Selectable source tap point (Item raw / Track post-FX / Post-fader incl. source volume automation) and destination apply point (Pre-FX volume envelope or a self-contained gain JSFX at the end of the chain, leaving the volume envelope free). Item-raw temporarily bypasses source-track FX; post-fader folds in the source volume envelope. Both choices via radio buttons.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Rename_Source_Files_To_Item_Names.lua" type="script" desc="JG Rename Source Files To Item Names">
