@@ -145,13 +145,6 @@
       </version>
     </reapack>
 
-    <reapack name="JG_Shift_Items_And_Envelopes_In_Range.lua" type="script" desc="JG Shift Items And Envelopes In Range">
-      <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release — shifts everything inside the time selection by an offset (seconds): items (take envelopes follow), track-envelope points with shape/tension preserved (incl. FX-param envelopes), and automation items. Nothing outside the selection moves; run with the negated offset to round-trip. Mode both/points/ai restricts envelope handling.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Shift_Items_And_Envelopes_In_Range.lua</source>
-      </version>
-    </reapack>
-
     <reapack name="JG_Smart_Insert_Track.lua" type="script" desc="JG Smart Insert Track">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
