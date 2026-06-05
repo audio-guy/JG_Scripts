@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.2.3
+-- @version 1.2.4
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -472,8 +472,10 @@ local function runAnalyzeWrite()
     state.status = string.format("Wrote %d/%d. Could not create the %s envelope on: %s",
                                  written, #dests, stage, table.concat(failed, ", "))
   else
-    state.status = string.format("Done: %d blocks, anchor %.1f LUFS, %d destination(s) written.",
-                                 #loud, anchor, written)
+    local ts0, ts1 = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+    local tsNote = (ts1 > ts0) and "  [LIMITED to time selection!]" or ""
+    state.status = string.format("Done: %d blocks, range %.1f-%.1f s%s, anchor %.1f LUFS, %d dest written.",
+                                 #loud, t0, t1, tsNote, anchor, written)
   end
 end
 

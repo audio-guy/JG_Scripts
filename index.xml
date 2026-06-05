@@ -125,6 +125,10 @@
         <changelog><![CDATA[Status line now reports per-destination failures explicitly (e.g. "Could not create the gain-JSFX envelope on: <track>") so an empty result is diagnosable instead of silent.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
       </version>
+      <version name="1.2.4" author="Julius Gass">
+        <changelog><![CDATA[Status line now shows the analysed time range and flags "[LIMITED to time selection!]" when an active time selection is shortening the analysis — makes a too-short ride (e.g. only the first second written) immediately obvious.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Rename_Source_Files_To_Item_Names.lua" type="script" desc="JG Rename Source Files To Item Names">
