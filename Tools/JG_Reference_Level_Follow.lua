@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.2.1
+-- @version 1.2.2
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -169,12 +169,26 @@ local function ensureRideJSFX()
   return RIDE_JSFX_NAME
 end
 
--- Find (or add at end of chain) the gain JSFX and return its param-0 envelope.
+-- Locate an existing JG Ride Gain instance on the track (by name, any position).
+local function findRideFX(track)
+  for i = 0, r.TrackFX_GetCount(track) - 1 do
+    local _, nm = r.TrackFX_GetFXName(track, i, "")
+    if nm:find("JG Ride Gain", 1, true) or nm:find(RIDE_JSFX_NAME, 1, true) then
+      return i
+    end
+  end
+  return -1
+end
+
+-- Reuse the existing gain JSFX (wherever it sits in the chain) or add one at the
+-- end; return its param-0 envelope.
 local function getGainParamEnv(track)
-  local name = ensureRideJSFX()
-  if not name then return nil end
-  local fx = r.TrackFX_AddByName(track, name, false, -1)
-  if fx < 0 then fx = r.TrackFX_AddByName(track, name, false, 1) end
+  local fx = findRideFX(track)
+  if fx < 0 then
+    local name = ensureRideJSFX()
+    if not name then return nil end
+    fx = r.TrackFX_AddByName(track, name, false, 1)
+  end
   if fx < 0 then return nil end
   return r.GetFXEnvelope(track, fx, 0, true)
 end
@@ -463,9 +477,8 @@ local function runClear()
   for _, tr in ipairs(dests) do
     local env
     if prefs.dstMode == "jsfx" then
-      local name = ensureRideJSFX()
-      local fx = name and r.TrackFX_AddByName(tr, name, false, 0) or -1
-      if fx and fx >= 0 then env = r.GetFXEnvelope(tr, fx, 0, false) end
+      local fx = findRideFX(tr)
+      if fx >= 0 then env = r.GetFXEnvelope(tr, fx, 0, false) end
     else
       env = r.GetTrackEnvelopeByChunkName(tr, "<VOLENV")
     end
