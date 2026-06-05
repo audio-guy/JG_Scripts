@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.2.0
+-- @version 1.2.1
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -395,16 +395,17 @@ local function writeEnvelopes(destTracks, times, g, t0, t1)
   r.Undo_BeginBlock()
   local written = 0
   local n = #g
-  local jsfxSpan = RIDE_JSFX_HI - RIDE_JSFX_LO
   for _, tr in ipairs(destTracks) do
     -- pick the target envelope and the dB -> envelope-value mapping for this mode
     local env, toValue
     if prefs.dstMode == "jsfx" then
       env = getGainParamEnv(tr)
+      -- A JSFX slider's parameter value space IS the slider's own range (dB
+      -- here), not normalised 0..1 — write the dB value directly.
       toValue = function(db)
-        local v = (db - RIDE_JSFX_LO) / jsfxSpan
-        if v < 0 then v = 0 elseif v > 1 then v = 1 end
-        return v
+        if db < RIDE_JSFX_LO then return RIDE_JSFX_LO end
+        if db > RIDE_JSFX_HI then return RIDE_JSFX_HI end
+        return db
       end
     else
       env = getPreFXVolEnv(tr)
