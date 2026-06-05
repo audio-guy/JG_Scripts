@@ -1,0 +1,457 @@
+-- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
+-- @author JG
+-- @version 1.0.0
+-- @about
+--   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
+--   roughly constant level) follow the macro dynamics of a "source" reference
+--   (e.g. a finished stereo mix). It measures the reference's short-term
+--   loudness (BS.1770-4 K-weighting) over time and writes a smoothed Pre-FX
+--   volume automation envelope onto the destinations, so they get louder where
+--   the reference is loud and quieter where it is quiet.
+--
+--   The ride is centred on the reference's median loudness (= 0 dB), so the
+--   destinations' static fader level is preserved on average; only deviations
+--   are followed. The ride lives on the *Pre-FX volume* envelope, leaving your
+--   main fader untouched as the static level.
+--
+--   GUI:
+--     Sources       - reference track(s) to follow (summed if several)
+--     Destinations  - track(s) to write the ride envelope onto
+--     Follow amount - how much of the reference dynamics comes through (depth)
+--     Inertia       - smoothing time; higher = slower, more "organic"
+--     Max boost/cut - safety limits for the ride
+--   If a time selection exists, only that range is analysed/written.
+--   During a reference rest (silence) the ride follows down to Max cut.
+--
+--   Requires the js_ReaScriptAPI-independent ReaImGui extension (ReaPack).
+
+local r = reaper
+
+if not r.ImGui_CreateContext then
+  r.MB("This script requires ReaImGui.\n\nInstall it via ReaPack:\nExtensions > ReaPack > Browse packages > search \"ReaImGui\".",
+       "Missing dependency", 0)
+  return
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Config / state
+-- ════════════════════════════════════════════════════════════════════════
+local EXT          = "JG_ReferenceLevelFollow"
+local ANALYSIS_SR  = 16000
+local HOP_SEC      = 0.1
+local SILENCE_LUFS = -70          -- below this a block counts as a rest
+local POINT_DELTA  = 0.05         -- dB change needed to emit a new envelope point
+
+local cfg   = { sources = {}, dests = {} }            -- track GUIDs (per project)
+local prefs = { depth = 50, inertia = 2.0, maxBoost = 6, maxCut = 12 } -- global
+local cache = { key = nil, times = nil, loud = nil }  -- analysis cache
+local state = { status = "Pick sources + destinations, then Analyze & Write." }
+local prefsDirty = false
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Persistence
+-- ════════════════════════════════════════════════════════════════════════
+local function split(s)
+  local t = {}
+  for x in (s or ""):gmatch("[^,]+") do t[#t+1] = x end
+  return t
+end
+
+local function saveCfg()
+  r.SetProjExtState(0, EXT, "sources", table.concat(cfg.sources, ","))
+  r.SetProjExtState(0, EXT, "dests",   table.concat(cfg.dests, ","))
+end
+
+local function loadCfg()
+  local _, s = r.GetProjExtState(0, EXT, "sources")
+  local _, d = r.GetProjExtState(0, EXT, "dests")
+  cfg.sources = split(s)
+  cfg.dests   = split(d)
+end
+
+local function savePrefs()
+  r.SetExtState(EXT, "depth",    tostring(prefs.depth),    true)
+  r.SetExtState(EXT, "inertia",  tostring(prefs.inertia),  true)
+  r.SetExtState(EXT, "maxboost", tostring(prefs.maxBoost), true)
+  r.SetExtState(EXT, "maxcut",   tostring(prefs.maxCut),   true)
+end
+
+local function loadPrefs()
+  prefs.depth    = tonumber(r.GetExtState(EXT, "depth"))    or prefs.depth
+  prefs.inertia  = tonumber(r.GetExtState(EXT, "inertia"))  or prefs.inertia
+  prefs.maxBoost = tonumber(r.GetExtState(EXT, "maxboost")) or prefs.maxBoost
+  prefs.maxCut   = tonumber(r.GetExtState(EXT, "maxcut"))   or prefs.maxCut
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Track helpers
+-- ════════════════════════════════════════════════════════════════════════
+local function captureSelected()
+  local g = {}
+  for i = 0, r.CountSelectedTracks(0) - 1 do
+    g[#g + 1] = r.GetTrackGUID(r.GetSelectedTrack(0, i))
+  end
+  return g
+end
+
+local function resolveTracks(guidList)
+  local want = {}
+  for _, g in ipairs(guidList) do want[g] = true end
+  local out = {}
+  for i = 0, r.CountTracks(0) - 1 do
+    local tr = r.GetTrack(0, i)
+    if want[r.GetTrackGUID(tr)] then out[#out + 1] = tr end
+  end
+  return out
+end
+
+local function namesFor(guidList)
+  local trs = resolveTracks(guidList)
+  if #trs == 0 then return "(none)" end
+  local names = {}
+  for _, tr in ipairs(trs) do
+    local _, nm = r.GetTrackName(tr)
+    names[#names + 1] = nm
+  end
+  return table.concat(names, ", ")
+end
+
+local function saveTrackSelection()
+  local s = {}
+  for i = 0, r.CountSelectedTracks(0) - 1 do s[#s + 1] = r.GetSelectedTrack(0, i) end
+  return s
+end
+
+local function restoreTrackSelection(s)
+  for i = 0, r.CountTracks(0) - 1 do r.SetTrackSelected(r.GetTrack(0, i), false) end
+  for _, tr in ipairs(s) do r.SetTrackSelected(tr, true) end
+end
+
+-- Pre-FX volume envelope, created if absent (action 41865 = toggle pre-FX vol env).
+local function getPreFXVolEnv(track)
+  local env = r.GetTrackEnvelopeByChunkName(track, "<VOLENV")
+  if env then return env end
+  r.SetOnlyTrackSelected(track)
+  r.Main_OnCommand(41865, 0)
+  return r.GetTrackEnvelopeByChunkName(track, "<VOLENV")
+end
+
+-- Analysis time range: time selection if set, else union of source content.
+local function getRange(srcTracks)
+  local s, e = r.GetSet_LoopTimeRange(false, false, 0, 0, false)
+  if e > s then return s, e end
+  local lo, hi = math.huge, -math.huge
+  for _, tr in ipairs(srcTracks) do
+    local acc = r.CreateTrackAudioAccessor(tr)
+    local a = r.GetAudioAccessorStartTime(acc)
+    local b = r.GetAudioAccessorEndTime(acc)
+    r.DestroyAudioAccessor(acc)
+    if a < lo then lo = a end
+    if b > hi then hi = b end
+  end
+  if hi <= lo then lo, hi = 0, r.GetProjectLength(0) end
+  if lo < 0 then lo = 0 end
+  return lo, hi
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  K-Weighting (BS.1770-4, bilinear transform) — proven engine
+-- ════════════════════════════════════════════════════════════════════════
+local function kweight_coeffs(sr)
+  local pi = math.pi
+  -- Stage 1: High-Shelf +4 dB @ 1681.97 Hz, Q 0.7072
+  local A   = 10 ^ (4 / 40)
+  local sqA = math.sqrt(A)
+  local f0  = 1681.974450955533
+  local Q   = 0.7071752369554196
+  local w0  = 2 * pi * f0 / sr
+  local c0, s0 = math.cos(w0), math.sin(w0)
+  local al  = s0 / (2 * Q)
+  local b0  =  A * ((A+1) + (A-1)*c0 + 2*sqA*al)
+  local b1  = -2 * A * ((A-1) + (A+1)*c0)
+  local b2  =  A * ((A+1) + (A-1)*c0 - 2*sqA*al)
+  local a0  = (A+1) - (A-1)*c0 + 2*sqA*al
+  local a1  =  2 * ((A-1) - (A+1)*c0)
+  local a2  = (A+1) - (A-1)*c0 - 2*sqA*al
+  local hs  = {b0/a0, b1/a0, b2/a0, a1/a0, a2/a0}
+  -- Stage 2: Butterworth HP 2nd order @ 38.14 Hz
+  local f1  = 38.13547087602444
+  local w1  = 2 * pi * f1 / sr
+  local c1, s1 = math.cos(w1), math.sin(w1)
+  local al1 = s1 / math.sqrt(2)
+  local d0  = (1 + c1) / 2;  local d1 = -(1 + c1);  local d2 = (1 + c1) / 2
+  local e0  = 1 + al1;       local e1 = -2 * c1;     local e2 = 1 - al1
+  local hp  = {d0/e0, d1/e0, d2/e0, e1/e0, e2/e0}
+  return hs, hp
+end
+
+-- Returns time[] (project sec) and loud[] (LUFS) per 100 ms block of the source sum.
+local function analyze(srcTracks, t0, t1)
+  local sr  = ANALYSIS_SR
+  local hs, hp = kweight_coeffs(sr)
+  local hs0,hs1,hs2,ha1,ha2 = hs[1],hs[2],hs[3],hs[4],hs[5]
+  local hp0,hp1,hp2,pa1,pa2 = hp[1],hp[2],hp[3],hp[4],hp[5]
+  local ax1,ax2,ay1,ay2 = 0,0,0,0
+  local ap1,ap2,aq1,aq2 = 0,0,0,0
+  local bx1,bx2,by1,by2 = 0,0,0,0
+  local bp1,bp2,bq1,bq2 = 0,0,0,0
+
+  local hop   = math.floor(HOP_SEC * sr)
+  local LOG10 = 0.4342944819032518
+  local CH    = 2
+  local CHUNK = 65536
+
+  local accs, bufs = {}, {}
+  for k, tr in ipairs(srcTracks) do
+    accs[k] = r.CreateTrackAudioAccessor(tr)
+    bufs[k] = r.new_array(CHUNK * CH)
+  end
+
+  local times, loud = {}, {}
+  local slotSum, slotCnt = 0.0, 0
+  local slotStart = t0
+  local nsrc = #srcTracks
+
+  local t = t0
+  while t < t1 - 1e-9 do
+    local want = math.min(CHUNK, math.floor((t1 - t) * sr + 0.5))
+    if want <= 0 then break end
+    for k = 1, nsrc do
+      r.GetAudioAccessorSamples(accs[k], sr, CH, t, want, bufs[k])
+    end
+    for i = 0, want - 1 do
+      local x1, x2 = 0.0, 0.0
+      for k = 1, nsrc do
+        local b = bufs[k]
+        x1 = x1 + b[i*2+1]
+        x2 = x2 + b[i*2+2]
+      end
+      local yA = hs0*x1 + hs1*ax1 + hs2*ax2 - ha1*ay1 - ha2*ay2
+      ax2=ax1; ax1=x1; ay2=ay1; ay1=yA
+      local yB = hp0*yA + hp1*ap1 + hp2*ap2 - pa1*aq1 - pa2*aq2
+      ap2=ap1; ap1=yA; aq2=aq1; aq1=yB
+      local yC = hs0*x2 + hs1*bx1 + hs2*bx2 - ha1*by1 - ha2*by2
+      bx2=bx1; bx1=x2; by2=by1; by1=yC
+      local yD = hp0*yC + hp1*bp1 + hp2*bp2 - pa1*bq1 - pa2*bq2
+      bp2=bp1; bp1=yC; bq2=bq1; bq1=yD
+
+      slotSum = slotSum + (yB*yB + yD*yD) * 0.5
+      slotCnt = slotCnt + 1
+      if slotCnt >= hop then
+        local ms = slotSum / slotCnt
+        loud[#loud + 1]  = (ms > 1e-12) and (-0.691 + 10*math.log(ms)*LOG10) or -150.0
+        times[#times + 1] = slotStart + HOP_SEC * 0.5
+        slotSum, slotCnt = 0.0, 0
+        slotStart = slotStart + HOP_SEC
+      end
+    end
+    t = t + want / sr
+  end
+
+  if slotCnt > 0 then
+    local ms = slotSum / slotCnt
+    loud[#loud + 1]  = (ms > 1e-12) and (-0.691 + 10*math.log(ms)*LOG10) or -150.0
+    times[#times + 1] = slotStart + HOP_SEC * 0.5
+  end
+
+  for k = 1, nsrc do r.DestroyAudioAccessor(accs[k]) end
+  return times, loud
+end
+
+local function ensureAnalysis(srcTracks, t0, t1)
+  local key = ""
+  for _, tr in ipairs(srcTracks) do key = key .. r.GetTrackGUID(tr) end
+  key = key .. string.format("|%.3f|%.3f|%d", t0, t1, ANALYSIS_SR)
+  if cache.key == key and cache.times then return cache.times, cache.loud end
+  local times, loud = analyze(srcTracks, t0, t1)
+  cache.key, cache.times, cache.loud = key, times, loud
+  return times, loud
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Gain derivation (depth, anchor, limits, zero-phase smoothing)
+-- ════════════════════════════════════════════════════════════════════════
+local function median(vals)
+  local c = {}
+  for _, v in ipairs(vals) do c[#c + 1] = v end
+  table.sort(c)
+  local n = #c
+  if n == 0 then return nil end
+  local mid = math.floor(n / 2)
+  if n % 2 == 1 then return c[mid + 1] else return 0.5 * (c[mid] + c[mid + 1]) end
+end
+
+local function deriveGain(times, loud)
+  local depth = prefs.depth / 100
+  local maxB, maxC = prefs.maxBoost, prefs.maxCut
+  local n = #loud
+
+  local nz = {}
+  for _, L in ipairs(loud) do if L > SILENCE_LUFS then nz[#nz + 1] = L end end
+  local anchor = median(nz) or -23
+
+  local g = {}
+  for i = 1, n do
+    local L = loud[i]
+    local gv
+    if L <= SILENCE_LUFS then gv = -maxC else gv = depth * (L - anchor) end
+    if gv > maxB then gv = maxB elseif gv < -maxC then gv = -maxC end
+    g[i] = gv
+  end
+
+  -- zero-phase one-pole smoothing (forward + backward), tau = inertia
+  local alpha = 1 - math.exp(-HOP_SEC / math.max(prefs.inertia, 1e-3))
+  local s = g[1] or 0
+  local f = {}
+  for i = 1, n do s = s + alpha * (g[i] - s); f[i] = s end
+  s = f[n] or 0
+  for i = n, 1, -1 do s = s + alpha * (f[i] - s); g[i] = s end
+  for i = 1, n do
+    if g[i] > maxB then g[i] = maxB elseif g[i] < -maxC then g[i] = -maxC end
+  end
+  return g, anchor
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Envelope writing
+-- ════════════════════════════════════════════════════════════════════════
+local function writeEnvelopes(destTracks, times, g, t0, t1)
+  local sel = saveTrackSelection()
+  r.PreventUIRefresh(1)
+  r.Undo_BeginBlock()
+  local written = 0
+  for _, tr in ipairs(destTracks) do
+    local env = getPreFXVolEnv(tr)
+    if env then
+      local scaling = r.GetEnvelopeScalingMode(env)
+      r.DeleteEnvelopePointRange(env, t0 - 0.0011, t1 + 0.0011)
+      local n = #g
+      if n > 0 then
+        local function put(i)
+          local v = r.ScaleToEnvelopeMode(scaling, 10 ^ (g[i] / 20))
+          r.InsertEnvelopePoint(env, times[i], v, 0, 0, false, true)
+        end
+        put(1)
+        local lastDb = g[1]
+        for i = 2, n - 1 do
+          if math.abs(g[i] - lastDb) >= POINT_DELTA then put(i); lastDb = g[i] end
+        end
+        if n > 1 then put(n) end
+        r.Envelope_SortPoints(env)
+        written = written + 1
+      end
+    end
+  end
+  r.Undo_EndBlock("Reference Level Follow: write envelopes", -1)
+  r.PreventUIRefresh(-1)
+  restoreTrackSelection(sel)
+  r.UpdateArrange()
+  return written
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Actions
+-- ════════════════════════════════════════════════════════════════════════
+local function runAnalyzeWrite()
+  local srcs  = resolveTracks(cfg.sources)
+  local dests = resolveTracks(cfg.dests)
+  if #srcs  == 0 then state.status = "Pick source track(s) first.";      return end
+  if #dests == 0 then state.status = "Pick destination track(s) first."; return end
+  local t0, t1 = getRange(srcs)
+  if t1 <= t0 then state.status = "Empty analysis range."; return end
+
+  local times, loud = ensureAnalysis(srcs, t0, t1)
+  if #loud == 0 then state.status = "No audio found in range."; return end
+  local g, anchor = deriveGain(times, loud)
+  local written = writeEnvelopes(dests, times, g, t0, t1)
+  state.status = string.format("Done: %d blocks, anchor %.1f LUFS, %d/%d destination(s) written.",
+                               #loud, anchor, written, #dests)
+end
+
+local function runClear()
+  local dests = resolveTracks(cfg.dests)
+  if #dests == 0 then state.status = "Pick destination track(s) first."; return end
+  local srcs = resolveTracks(cfg.sources)
+  local t0, t1 = getRange(#srcs > 0 and srcs or dests)
+  r.Undo_BeginBlock()
+  for _, tr in ipairs(dests) do
+    local env = r.GetTrackEnvelopeByChunkName(tr, "<VOLENV")
+    if env then
+      r.DeleteEnvelopePointRange(env, t0 - 0.0011, t1 + 0.0011)
+      r.Envelope_SortPoints(env)
+    end
+  end
+  r.Undo_EndBlock("Reference Level Follow: clear envelopes", -1)
+  r.UpdateArrange()
+  state.status = "Cleared Pre-FX volume envelope in range on destination(s)."
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  GUI
+-- ════════════════════════════════════════════════════════════════════════
+local ctx  = r.ImGui_CreateContext("JG Reference Level Follow")
+local font = r.ImGui_CreateFont("sans-serif", 14)
+r.ImGui_Attach(ctx, font)
+
+local function drawGUI()
+  r.ImGui_Text(ctx, "Sources (reference to follow):")
+  if r.ImGui_Button(ctx, "Capture from selected##src", 210, 24) then
+    cfg.sources = captureSelected(); cache.key = nil; saveCfg()
+  end
+  r.ImGui_SameLine(ctx)
+  r.ImGui_Text(ctx, namesFor(cfg.sources))
+
+  r.ImGui_Text(ctx, "Destinations (tracks to ride):")
+  if r.ImGui_Button(ctx, "Capture from selected##dst", 210, 24) then
+    cfg.dests = captureSelected(); saveCfg()
+  end
+  r.ImGui_SameLine(ctx)
+  r.ImGui_Text(ctx, namesFor(cfg.dests))
+
+  r.ImGui_Separator(ctx)
+
+  local ch
+  ch, prefs.depth    = r.ImGui_SliderDouble(ctx, "Follow amount", prefs.depth,    0, 100, "%.0f %%")
+  if ch then prefsDirty = true end
+  ch, prefs.inertia  = r.ImGui_SliderDouble(ctx, "Inertia",       prefs.inertia,  0.1, 6.0, "%.1f s")
+  if ch then prefsDirty = true end
+  ch, prefs.maxBoost = r.ImGui_SliderDouble(ctx, "Max boost",     prefs.maxBoost, 0, 12, "+%.1f dB")
+  if ch then prefsDirty = true end
+  ch, prefs.maxCut   = r.ImGui_SliderDouble(ctx, "Max cut",       prefs.maxCut,   0, 24, "-%.1f dB")
+  if ch then prefsDirty = true end
+
+  r.ImGui_Separator(ctx)
+
+  if r.ImGui_Button(ctx, "Analyze & Write", 160, 28) then runAnalyzeWrite() end
+  r.ImGui_SameLine(ctx)
+  if r.ImGui_Button(ctx, "Clear", 90, 28) then runClear() end
+
+  r.ImGui_Spacing(ctx)
+  r.ImGui_Text(ctx, state.status)
+  r.ImGui_Spacing(ctx)
+  r.ImGui_TextWrapped(ctx,
+    "Ride is written to the Pre-FX volume envelope, centred on the reference's " ..
+    "median loudness (0 dB). First analysis reads the audio (window may freeze " ..
+    "briefly); changing sliders and re-writing is instant. Set a time selection " ..
+    "to limit the range.")
+end
+
+local function loop()
+  r.ImGui_PushFont(ctx, font, 14)
+  r.ImGui_SetNextWindowSize(ctx, 480, 380, r.ImGui_Cond_FirstUseEver())
+  local visible, open = r.ImGui_Begin(ctx, "JG Reference Level Follow", true)
+  if visible then
+    drawGUI()
+    r.ImGui_End(ctx)
+  end
+  r.ImGui_PopFont(ctx)
+
+  if prefsDirty then savePrefs(); prefsDirty = false end
+  if open then r.defer(loop) end
+end
+
+-- Entry
+loadPrefs()
+loadCfg()
+r.atexit(savePrefs)
+loop()

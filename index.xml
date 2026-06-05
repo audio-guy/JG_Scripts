@@ -100,6 +100,13 @@
       </version>
     </reapack>
 
+    <reapack name="JG_Reference_Level_Follow.lua" type="script" desc="JG Reference Level Follow">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — rides destination track(s) to follow a reference's macro dynamics. Measures the source reference short-term loudness (BS.1770-4 K-weighting) and writes a smoothed Pre-FX volume envelope onto the destinations (louder where the reference is loud, quieter where quiet). ReaImGui GUI: capture source/destination tracks, Follow amount (depth), Inertia, Max boost/cut. Time-selection aware, silence follows to Max cut. Requires ReaImGui.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Reference_Level_Follow.lua</source>
+      </version>
+    </reapack>
+
     <reapack name="JG_Rename_Source_Files_To_Item_Names.lua" type="script" desc="JG Rename Source Files To Item Names">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
