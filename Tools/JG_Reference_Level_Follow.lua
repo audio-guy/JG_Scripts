@@ -1,6 +1,6 @@
 -- @description Reference Level Follow (ride a track's level to follow a reference's dynamics)
 -- @author JG
--- @version 1.0.0
+-- @version 1.1.0
 -- @about
 --   Makes one or more "destination" tracks (e.g. a choir/piano backing with a
 --   roughly constant level) follow the macro dynamics of a "source" reference
@@ -17,9 +17,9 @@
 --   GUI:
 --     Sources       - reference track(s) to follow (summed if several)
 --     Destinations  - track(s) to write the ride envelope onto
---     Follow amount - how much of the reference dynamics comes through (depth)
+--     Follow amount - how steeply the ride tracks the reference (slope/depth)
 --     Inertia       - smoothing time; higher = slower, more "organic"
---     Max boost/cut - safety limits for the ride
+--     Ride range    - hard floor/ceiling (lower/upper dB limits) for the ride
 --   If a time selection exists, only that range is analysed/written.
 --   During a reference rest (silence) the ride follows down to Max cut.
 --
@@ -43,7 +43,7 @@ local SILENCE_LUFS = -70          -- below this a block counts as a rest
 local POINT_DELTA  = 0.05         -- dB change needed to emit a new envelope point
 
 local cfg   = { sources = {}, dests = {} }            -- track GUIDs (per project)
-local prefs = { depth = 50, inertia = 2.0, maxBoost = 6, maxCut = 12 } -- global
+local prefs = { depth = 50, inertia = 2.0, lowerLimit = -12, upperLimit = 6 } -- global
 local cache = { key = nil, times = nil, loud = nil }  -- analysis cache
 local state = { status = "Pick sources + destinations, then Analyze & Write." }
 local prefsDirty = false
@@ -72,15 +72,18 @@ end
 local function savePrefs()
   r.SetExtState(EXT, "depth",    tostring(prefs.depth),    true)
   r.SetExtState(EXT, "inertia",  tostring(prefs.inertia),  true)
-  r.SetExtState(EXT, "maxboost", tostring(prefs.maxBoost), true)
-  r.SetExtState(EXT, "maxcut",   tostring(prefs.maxCut),   true)
+  r.SetExtState(EXT, "lower", tostring(prefs.lowerLimit), true)
+  r.SetExtState(EXT, "upper", tostring(prefs.upperLimit), true)
 end
 
 local function loadPrefs()
-  prefs.depth    = tonumber(r.GetExtState(EXT, "depth"))    or prefs.depth
-  prefs.inertia  = tonumber(r.GetExtState(EXT, "inertia"))  or prefs.inertia
-  prefs.maxBoost = tonumber(r.GetExtState(EXT, "maxboost")) or prefs.maxBoost
-  prefs.maxCut   = tonumber(r.GetExtState(EXT, "maxcut"))   or prefs.maxCut
+  prefs.depth   = tonumber(r.GetExtState(EXT, "depth"))   or prefs.depth
+  prefs.inertia = tonumber(r.GetExtState(EXT, "inertia")) or prefs.inertia
+  -- migrate old maxboost/maxcut (positive) to signed lower/upper limits
+  local oldB = tonumber(r.GetExtState(EXT, "maxboost"))
+  local oldC = tonumber(r.GetExtState(EXT, "maxcut"))
+  prefs.lowerLimit = tonumber(r.GetExtState(EXT, "lower")) or (oldC and -oldC) or prefs.lowerLimit
+  prefs.upperLimit = tonumber(r.GetExtState(EXT, "upper")) or oldB or prefs.upperLimit
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -283,7 +286,8 @@ end
 
 local function deriveGain(times, loud)
   local depth = prefs.depth / 100
-  local maxB, maxC = prefs.maxBoost, prefs.maxCut
+  local lo, hi = prefs.lowerLimit, prefs.upperLimit
+  if lo > hi then lo, hi = hi, lo end
   local n = #loud
 
   local nz = {}
@@ -294,8 +298,8 @@ local function deriveGain(times, loud)
   for i = 1, n do
     local L = loud[i]
     local gv
-    if L <= SILENCE_LUFS then gv = -maxC else gv = depth * (L - anchor) end
-    if gv > maxB then gv = maxB elseif gv < -maxC then gv = -maxC end
+    if L <= SILENCE_LUFS then gv = lo else gv = depth * (L - anchor) end
+    if gv > hi then gv = hi elseif gv < lo then gv = lo end
     g[i] = gv
   end
 
@@ -307,7 +311,7 @@ local function deriveGain(times, loud)
   s = f[n] or 0
   for i = n, 1, -1 do s = s + alpha * (f[i] - s); g[i] = s end
   for i = 1, n do
-    if g[i] > maxB then g[i] = maxB elseif g[i] < -maxC then g[i] = -maxC end
+    if g[i] > hi then g[i] = hi elseif g[i] < lo then g[i] = lo end
   end
   return g, anchor
 end
@@ -411,14 +415,17 @@ local function drawGUI()
   r.ImGui_Separator(ctx)
 
   local ch
-  ch, prefs.depth    = r.ImGui_SliderDouble(ctx, "Follow amount", prefs.depth,    0, 100, "%.0f %%")
+  ch, prefs.depth   = r.ImGui_SliderDouble(ctx, "Follow amount", prefs.depth,   0, 100, "%.0f %%")
   if ch then prefsDirty = true end
-  ch, prefs.inertia  = r.ImGui_SliderDouble(ctx, "Inertia",       prefs.inertia,  0.1, 6.0, "%.1f s")
+  ch, prefs.inertia = r.ImGui_SliderDouble(ctx, "Inertia",       prefs.inertia, 0.1, 6.0, "%.1f s")
   if ch then prefsDirty = true end
-  ch, prefs.maxBoost = r.ImGui_SliderDouble(ctx, "Max boost",     prefs.maxBoost, 0, 12, "+%.1f dB")
+  ch, prefs.lowerLimit, prefs.upperLimit =
+    r.ImGui_DragFloatRange2(ctx, "Ride range (dB)", prefs.lowerLimit, prefs.upperLimit,
+                            0.1, -24, 12, "%.1f", "%.1f")
   if ch then prefsDirty = true end
-  ch, prefs.maxCut   = r.ImGui_SliderDouble(ctx, "Max cut",       prefs.maxCut,   0, 24, "-%.1f dB")
-  if ch then prefsDirty = true end
+  r.ImGui_TextWrapped(ctx,
+    "Follow amount = slope (at 100%, ref +6 dB over its median -> +6 dB ride). " ..
+    "Ride range = lower/upper hard limits; reference rests fall to the lower limit.")
 
   r.ImGui_Separator(ctx)
 
