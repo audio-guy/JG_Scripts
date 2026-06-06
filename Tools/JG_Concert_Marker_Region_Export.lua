@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.1.1
+-- @version 1.1.2
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -553,22 +553,9 @@ local function buildPdf(pages)
 
   local pageIds = {}
   for _, ops in ipairs(pages) do
-    -- Split ops into graphics (rects) and text — PDF graphics ops must
-    -- appear OUTSIDE the BT…ET text block. Emit rects first, then text.
-    local rects, texts = {}, {}
-    for _, op in ipairs(ops) do
-      if op.kind == "rect" then rects[#rects+1] = op else texts[#texts+1] = op end
-    end
-    local buf = {}
-    for _, op in ipairs(rects) do
-      buf[#buf+1] = string.format("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
-        op.color[1] / 255, op.color[2] / 255, op.color[3] / 255,
-        op.x, op.y, op.w, op.h)
-    end
-    buf[#buf+1] = "0 0 0 rg\n"  -- reset fill color to black for text
-    buf[#buf+1] = "BT\n"
+    local buf = { "BT\n" }
     local curBold, curSize
-    for _, op in ipairs(texts) do
+    for _, op in ipairs(ops) do
       if op.bold ~= curBold or op.size ~= curSize then
         buf[#buf+1] = (op.bold and "/F2 " or "/F1 ") .. string.format("%g", op.size) .. " Tf\n"
         curBold, curSize = op.bold, op.size
@@ -626,15 +613,12 @@ local function buildPages(rows, meta)
   local FS_SUB      = 10
   local FS_FOOT     = 9
 
-  -- column right edges (right-aligned numerics).
-  -- A 6pt colour swatch sits in a 12pt-wide gutter at the left edge.
-  local X_SWATCH_L = LM
-  local SWATCH_W   = 6
-  local X_NUM_R    = LM + 40
-  local X_START_R  = LM + 120
-  local X_LEN_R    = LM + 195
-  local X_NAME_L   = LM + 210
-  local X_RIGHT    = PAGE_W - RM
+  -- column right edges (right-aligned numerics)
+  local X_NUM_R   = LM + 28
+  local X_START_R = LM + 110
+  local X_LEN_R   = LM + 185
+  local X_NAME_L  = LM + 200
+  local X_RIGHT   = PAGE_W - RM
 
   local function newPage()
     ops = {}
@@ -675,11 +659,6 @@ local function buildPages(rows, meta)
       y = y - LINE_H
     end
     local bold = row.isSong == true
-    if row.swatchRGB then
-      ops[#ops+1] = { kind = "rect",
-        x = X_SWATCH_L, y = y - 1, w = SWATCH_W, h = FS_BODY - 2,
-        color = row.swatchRGB }
-    end
     pushRightAligned(row.num,   X_NUM_R,   y, bold, FS_BODY)
     pushRightAligned(row.start, X_START_R, y, bold, FS_BODY)
     pushRightAligned(row.len,   X_LEN_R,   y, bold, FS_BODY)
@@ -749,10 +728,6 @@ local function buildRowsAndStats()
       inferredSong= it.inferredSong,
       hasOverride = it.hasOverride,
     }
-    if (it.color or 0) ~= 0 then
-      local rr, gg, bb = r.ColorFromNative(it.color & 0xFFFFFF)
-      row.swatchRGB = { rr, gg, bb }
-    end
     if it.isSong then
       songNum = songNum + 1
       songCount = songCount + 1
@@ -993,9 +968,8 @@ local function drawPreviewTable(rows)
   end
   local childFlags = (r.ImGui_ChildFlags_Border and r.ImGui_ChildFlags_Border()) or 0
   if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, childFlags) then
-    if r.ImGui_BeginTable(ctx, "preview", 6,
+    if r.ImGui_BeginTable(ctx, "preview", 5,
          r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
-      r.ImGui_TableSetupColumn(ctx, "",      r.ImGui_TableColumnFlags_WidthFixed(), 20)  -- swatch
       r.ImGui_TableSetupColumn(ctx, "Song",  r.ImGui_TableColumnFlags_WidthFixed(), 46)
       r.ImGui_TableSetupColumn(ctx, "#",     r.ImGui_TableColumnFlags_WidthFixed(), 30)
       r.ImGui_TableSetupColumn(ctx, "Start", r.ImGui_TableColumnFlags_WidthFixed(), 70)
@@ -1005,28 +979,22 @@ local function drawPreviewTable(rows)
       for i, row in ipairs(rows) do
         r.ImGui_TableNextRow(ctx)
         r.ImGui_TableSetColumnIndex(ctx, 0)
-        if row.swatchRGB then
-          local sw = ((row.swatchRGB[1] & 0xFF) << 24) | ((row.swatchRGB[2] & 0xFF) << 16) | ((row.swatchRGB[3] & 0xFF) << 8) | 0xFF
-          r.ImGui_ColorButton(ctx, "##psw"..i, sw,
-            r.ImGui_ColorEditFlags_NoTooltip() | r.ImGui_ColorEditFlags_NoPicker(), 12, 12)
-        end
-        r.ImGui_TableSetColumnIndex(ctx, 1)
         if row.guid then
           local chg, v = r.ImGui_Checkbox(ctx, "##psng"..i, row.isSong)
           if chg then
-            row.isSong = v  -- visual instant feedback
+            row.isSong = v
             togglePreviewOverride(row)
           end
         else
           r.ImGui_TextDisabled(ctx, row.isSong and "S" or "·")
         end
-        r.ImGui_TableSetColumnIndex(ctx, 2)
+        r.ImGui_TableSetColumnIndex(ctx, 1)
         r.ImGui_Text(ctx, row.num or "")
-        r.ImGui_TableSetColumnIndex(ctx, 3)
+        r.ImGui_TableSetColumnIndex(ctx, 2)
         r.ImGui_Text(ctx, row.start or "")
-        r.ImGui_TableSetColumnIndex(ctx, 4)
+        r.ImGui_TableSetColumnIndex(ctx, 3)
         r.ImGui_Text(ctx, row.len or "")
-        r.ImGui_TableSetColumnIndex(ctx, 5)
+        r.ImGui_TableSetColumnIndex(ctx, 4)
         local name = row.name or ""
         if row.hasOverride then name = name .. "  *" end
         r.ImGui_Text(ctx, name)

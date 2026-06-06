@@ -35,6 +35,10 @@
         <changelog><![CDATA[Fix crash in preview pane: ImGui_BeginChild's 5th argument is now child_flags (a number) instead of the old border boolean. Use ImGui_ChildFlags_Border() if available, else 0.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.1.2" author="Julius Gass">
+        <changelog><![CDATA[Remove marker colour swatch from PDF and preview pane (visual noise outweighed the benefit). PDF column layout reverted to the pre-1.1.0 positions. Preview pane drops the swatch column. PDF content stream simplified back to text-only.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
