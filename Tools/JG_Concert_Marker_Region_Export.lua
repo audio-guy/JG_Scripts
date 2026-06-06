@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.0.4
+-- @version 1.1.0
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -50,6 +50,7 @@ local prefs = {
 local proj = {
   laneInclude = {},   -- [laneKey] = bool (default true)
   laneSong    = {},   -- [laneKey] = bool (default false)
+  override    = {},   -- [markerGuid] = "s" force-song / "n" force-not-song
 }
 
 local state = { status = "Configure lanes, then Export." }
@@ -90,16 +91,36 @@ local function serMap(t)
   return table.concat(parts, ",")
 end
 
+-- Overrides are stored as "guid=s,guid=n,...". GUIDs contain "{}-" but
+-- never "=" or ",", so naive split works.
+local function deserOverride(s)
+  local t = {}
+  for kv in (s or ""):gmatch("[^,]+") do
+    local k, v = kv:match("^(.-)=(.+)$")
+    if k and v then t[k] = v end
+  end
+  return t
+end
+
+local function serOverride(t)
+  local parts = {}
+  for k, v in pairs(t) do parts[#parts+1] = k .. "=" .. v end
+  return table.concat(parts, ",")
+end
+
 local function loadProj()
   local _, inc = r.GetProjExtState(0, EXT, "laneInc")
   local _, sng = r.GetProjExtState(0, EXT, "laneSng")
+  local _, ovr = r.GetProjExtState(0, EXT, "override")
   proj.laneInclude = deserMap(inc)
   proj.laneSong    = deserMap(sng)
+  proj.override    = deserOverride(ovr)
 end
 
 local function saveProj()
-  r.SetProjExtState(0, EXT, "laneInc", serMap(proj.laneInclude))
-  r.SetProjExtState(0, EXT, "laneSng", serMap(proj.laneSong))
+  r.SetProjExtState(0, EXT, "laneInc",  serMap(proj.laneInclude))
+  r.SetProjExtState(0, EXT, "laneSng",  serMap(proj.laneSong))
+  r.SetProjExtState(0, EXT, "override", serOverride(proj.override))
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -159,12 +180,14 @@ end
 -- Returns:
 --   laneNames     [laneIdx] = "Lane Name"
 --   markerLaneOf  ["m:"|"r:" .. idx] = laneIdx
+--   markerGuidOf  ["m:"|"r:" .. idx] = "{GUID}"
 local function parseLaneInfo()
   local raw = getProjectChunkMarkerSection()
-  if raw == "" then return {}, {} end
+  if raw == "" then return {}, {}, {} end
 
   local laneNames    = {}
   local markerLaneOf = {}
+  local markerGuidOf = {}
 
   -- Read one token from a string (quoted "…" or bare \S+), returning
   -- (token, remainder).
@@ -208,13 +231,16 @@ local function parseLaneInfo()
               isRegion = (tonumber(flagStr) & 1) ~= 0
             end
           end
-          markerLaneOf[(isRegion and "r:" or "m:") .. mIdxStr] = last
+          local key = (isRegion and "r:" or "m:") .. mIdxStr
+          markerLaneOf[key] = last
+          local guid = line:match("({%x%x%x%x%x%x%x%x%-[^}]+})")
+          if guid then markerGuidOf[key] = guid end
         end
       end
     end
   end
 
-  return laneNames, markerLaneOf
+  return laneNames, markerLaneOf, markerGuidOf
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -250,9 +276,11 @@ end
 --     lane-based grouping.
 --   * Otherwise → fall back to grouping by colour.
 local function attachLanes(items)
-  local laneNames, markerLaneOf = parseLaneInfo()
+  local laneNames, markerLaneOf, markerGuidOf = parseLaneInfo()
   for _, it in ipairs(items) do
-    it.laneIdx = markerLaneOf[(it.type == "r" and "r:" or "m:") .. tostring(it.idx)]
+    local key  = (it.type == "r" and "r:" or "m:") .. tostring(it.idx)
+    it.laneIdx = markerLaneOf[key]
+    it.guid    = markerGuidOf[key]
   end
   return laneNames
 end
@@ -350,9 +378,16 @@ local function classify(items, blacklist, byLane)
     local laneMatch   = proj.laneSong[k] == true
     local regionMatch = prefs.regionAsSong and it.type == "r"
     local prefixMatch = prefs.prefix ~= "" and it.name:sub(1, #prefs.prefix) == prefs.prefix
-    local isSong      = laneMatch or regionMatch or prefixMatch
-    if isSong and isBlacklisted(it.name, blacklist) then isSong = false end
-    it.isSong = isSong
+    local inferred    = laneMatch or regionMatch or prefixMatch
+    if inferred and isBlacklisted(it.name, blacklist) then inferred = false end
+    it.inferredSong = inferred
+    -- Per-marker manual override (by GUID) takes precedence
+    local ov = it.guid and proj.override[it.guid] or nil
+    if ov == "s" then it.isSong = true
+    elseif ov == "n" then it.isSong = false
+    else it.isSong = inferred
+    end
+    it.hasOverride = (ov ~= nil)
   end
 end
 
@@ -518,9 +553,22 @@ local function buildPdf(pages)
 
   local pageIds = {}
   for _, ops in ipairs(pages) do
-    local buf = { "BT\n" }
-    local curBold, curSize
+    -- Split ops into graphics (rects) and text — PDF graphics ops must
+    -- appear OUTSIDE the BT…ET text block. Emit rects first, then text.
+    local rects, texts = {}, {}
     for _, op in ipairs(ops) do
+      if op.kind == "rect" then rects[#rects+1] = op else texts[#texts+1] = op end
+    end
+    local buf = {}
+    for _, op in ipairs(rects) do
+      buf[#buf+1] = string.format("%.3f %.3f %.3f rg %.2f %.2f %.2f %.2f re f\n",
+        op.color[1] / 255, op.color[2] / 255, op.color[3] / 255,
+        op.x, op.y, op.w, op.h)
+    end
+    buf[#buf+1] = "0 0 0 rg\n"  -- reset fill color to black for text
+    buf[#buf+1] = "BT\n"
+    local curBold, curSize
+    for _, op in ipairs(texts) do
       if op.bold ~= curBold or op.size ~= curSize then
         buf[#buf+1] = (op.bold and "/F2 " or "/F1 ") .. string.format("%g", op.size) .. " Tf\n"
         curBold, curSize = op.bold, op.size
@@ -578,12 +626,15 @@ local function buildPages(rows, meta)
   local FS_SUB      = 10
   local FS_FOOT     = 9
 
-  -- column right edges (right-aligned numerics)
-  local X_NUM_R   = LM + 28
-  local X_START_R = LM + 110
-  local X_LEN_R   = LM + 185
-  local X_NAME_L  = LM + 200
-  local X_RIGHT   = PAGE_W - RM
+  -- column right edges (right-aligned numerics).
+  -- A 6pt colour swatch sits in a 12pt-wide gutter at the left edge.
+  local X_SWATCH_L = LM
+  local SWATCH_W   = 6
+  local X_NUM_R    = LM + 40
+  local X_START_R  = LM + 120
+  local X_LEN_R    = LM + 195
+  local X_NAME_L   = LM + 210
+  local X_RIGHT    = PAGE_W - RM
 
   local function newPage()
     ops = {}
@@ -624,6 +675,11 @@ local function buildPages(rows, meta)
       y = y - LINE_H
     end
     local bold = row.isSong == true
+    if row.swatchRGB then
+      ops[#ops+1] = { kind = "rect",
+        x = X_SWATCH_L, y = y - 1, w = SWATCH_W, h = FS_BODY - 2,
+        color = row.swatchRGB }
+    end
     pushRightAligned(row.num,   X_NUM_R,   y, bold, FS_BODY)
     pushRightAligned(row.start, X_START_R, y, bold, FS_BODY)
     pushRightAligned(row.len,   X_LEN_R,   y, bold, FS_BODY)
@@ -685,11 +741,18 @@ local function buildRowsAndStats()
   local songNum = 0
   for _, it in ipairs(visible) do
     local row = {
-      pos    = it.pos,
-      start  = fmtPos(it.pos),
-      name   = trimDisplayName(it.name, prefs.prefix),
-      isSong = it.isSong,
+      pos         = it.pos,
+      start       = fmtPos(it.pos),
+      name        = trimDisplayName(it.name, prefs.prefix),
+      isSong      = it.isSong,
+      guid        = it.guid,
+      inferredSong= it.inferredSong,
+      hasOverride = it.hasOverride,
     }
+    if (it.color or 0) ~= 0 then
+      local rr, gg, bb = r.ColorFromNative(it.color & 0xFFFFFF)
+      row.swatchRGB = { rr, gg, bb }
+    end
     if it.isSong then
       songNum = songNum + 1
       songCount = songCount + 1
@@ -909,6 +972,71 @@ local function drawLaneTable(lanes, byLane)
   end
 end
 
+-- Per-row preview table: shows exactly what the PDF will contain, with a
+-- per-marker Song toggle that overrides the auto-classification. Toggling
+-- back to the inferred value removes the override (so it doesn't linger).
+local function togglePreviewOverride(row)
+  if not row.guid then return end
+  local newSong = not row.isSong
+  if newSong == row.inferredSong then
+    proj.override[row.guid] = nil
+  else
+    proj.override[row.guid] = newSong and "s" or "n"
+  end
+  projDirty = true
+end
+
+local function drawPreviewTable(rows)
+  if #rows == 0 then
+    r.ImGui_TextDisabled(ctx, "(Nothing to preview — adjust lanes or save the project first.)")
+    return
+  end
+  if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, true) then
+    if r.ImGui_BeginTable(ctx, "preview", 6,
+         r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
+      r.ImGui_TableSetupColumn(ctx, "",      r.ImGui_TableColumnFlags_WidthFixed(), 20)  -- swatch
+      r.ImGui_TableSetupColumn(ctx, "Song",  r.ImGui_TableColumnFlags_WidthFixed(), 46)
+      r.ImGui_TableSetupColumn(ctx, "#",     r.ImGui_TableColumnFlags_WidthFixed(), 30)
+      r.ImGui_TableSetupColumn(ctx, "Start", r.ImGui_TableColumnFlags_WidthFixed(), 70)
+      r.ImGui_TableSetupColumn(ctx, "Länge", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+      r.ImGui_TableSetupColumn(ctx, "Name")
+      r.ImGui_TableHeadersRow(ctx)
+      for i, row in ipairs(rows) do
+        r.ImGui_TableNextRow(ctx)
+        r.ImGui_TableSetColumnIndex(ctx, 0)
+        if row.swatchRGB then
+          local sw = ((row.swatchRGB[1] & 0xFF) << 24) | ((row.swatchRGB[2] & 0xFF) << 16) | ((row.swatchRGB[3] & 0xFF) << 8) | 0xFF
+          r.ImGui_ColorButton(ctx, "##psw"..i, sw,
+            r.ImGui_ColorEditFlags_NoTooltip() | r.ImGui_ColorEditFlags_NoPicker(), 12, 12)
+        end
+        r.ImGui_TableSetColumnIndex(ctx, 1)
+        if row.guid then
+          local chg, v = r.ImGui_Checkbox(ctx, "##psng"..i, row.isSong)
+          if chg then
+            row.isSong = v  -- visual instant feedback
+            togglePreviewOverride(row)
+          end
+        else
+          r.ImGui_TextDisabled(ctx, row.isSong and "S" or "·")
+        end
+        r.ImGui_TableSetColumnIndex(ctx, 2)
+        r.ImGui_Text(ctx, row.num or "")
+        r.ImGui_TableSetColumnIndex(ctx, 3)
+        r.ImGui_Text(ctx, row.start or "")
+        r.ImGui_TableSetColumnIndex(ctx, 4)
+        r.ImGui_Text(ctx, row.len or "")
+        r.ImGui_TableSetColumnIndex(ctx, 5)
+        local name = row.name or ""
+        if row.hasOverride then name = name .. "  *" end
+        r.ImGui_Text(ctx, name)
+      end
+      r.ImGui_EndTable(ctx)
+    end
+    r.ImGui_EndChild(ctx)
+  end
+  r.ImGui_TextDisabled(ctx, "  Click the Song checkbox to override auto-detection per marker. Asterisk = active override.")
+end
+
 -- Debug: dump the marker-related lines of the project chunk so the user
 -- can share the format for further parsing work. Prefers clipboard (SWS)
 -- and falls back to writing a text file next to the .rpp.
@@ -990,6 +1118,16 @@ local function drawGUI()
 
   r.ImGui_Separator(ctx)
 
+  -- Live preview of exported rows with per-marker override toggle
+  local previewRows, previewStats = buildRowsAndStats()
+  r.ImGui_Text(ctx, string.format(
+    "Preview — %d rows, %d songs   ·   Net %s   ·   Gross %s",
+    #previewRows, previewStats.songCount,
+    fmtHMS(previewStats.netMusic), fmtHMS(previewStats.brutto)))
+  drawPreviewTable(previewRows)
+
+  r.ImGui_Separator(ctx)
+
   if r.ImGui_Button(ctx, "Export PDF", 130, 28) then exportPdf(nil) end
   r.ImGui_SameLine(ctx)
   if r.JS_Dialog_BrowseForSaveFile then
@@ -1008,7 +1146,7 @@ end
 
 local function loop()
   r.ImGui_PushFont(ctx, font, 14)
-  r.ImGui_SetNextWindowSize(ctx, 720, 560, r.ImGui_Cond_FirstUseEver())
+  r.ImGui_SetNextWindowSize(ctx, 760, 820, r.ImGui_Cond_FirstUseEver())
   local visible, open = r.ImGui_Begin(ctx, "JG Concert Marker/Region Export", true)
   if visible then
     drawGUI()

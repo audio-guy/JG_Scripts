@@ -27,6 +27,10 @@
         <changelog><![CDATA[Lane name detection now actually works: parse the project chunk's RULERLANE entries with the real format Reaper 7+ uses ("RULERLANE idx flag name color …" — name is unquoted for single-word lanes, quoted otherwise). Reaper-7-named lanes ("Songs", "Marker", "Region") now appear by name in the GUI's lane table; the color/type fallback only kicks in when no named lanes exist. Marker-lane lookup keyed by (type, idx) so markers and regions sharing index numbers don't collide.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Live preview + per-row override: a scrollable preview pane below the lane table shows exactly what the PDF will contain. The "Song" checkbox per row overrides the auto-classification for that single marker (persists by marker GUID, survives renaming and moving). An asterisk after the name marks an active override; flipping the override back to the auto value removes it. Marker colour swatch in the PDF: a small coloured square left of the row number reflects each marker's Reaper colour (skipped for default-coloured markers). PDF column layout shifted 10pt right to make room.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
