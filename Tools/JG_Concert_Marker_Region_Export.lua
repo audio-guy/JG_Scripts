@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.0.0
+-- @version 1.0.1
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -103,6 +103,81 @@ local function saveProj()
 end
 
 -- ════════════════════════════════════════════════════════════════════════
+--  Project chunk parsing — try to extract real Reaper 7+ marker lanes.
+--  Reaper exposes no API for marker lanes, so we parse the project chunk
+--  heuristically. We try several known token names and field positions; if
+--  none match, callers fall back to grouping by colour.
+-- ════════════════════════════════════════════════════════════════════════
+local function getProjectChunkMarkerSection()
+  local ok, chunk = r.GetProjectStateChunk(0, false)
+  if not ok or not chunk then return "" end
+  local lines = {}
+  for line in chunk:gmatch("[^\r\n]+") do
+    local t = line:match("^%s*(.-)%s*$")
+    if t:match("^MARKER")
+       or t:match("^LANE")
+       or t:match("LANE")
+       or t:match("^RULER")
+       or t:match("^<MARK") then
+      lines[#lines+1] = t
+    end
+  end
+  return table.concat(lines, "\n")
+end
+
+-- Parse marker chunk lines. Each MARKER line in v6 looks like:
+--   MARKER idx pos "name" flags color id B {guid} laneOrZero
+-- In Reaper 7+ with named lanes there is (according to community reports) an
+-- additional trailing field carrying the lane index, plus a separate block
+-- naming each lane. We try to match both. Returns:
+--   laneNames     [laneIdx] = "Lane Name"   (may be empty)
+--   markerLaneOf  [itemUid] = laneIdx       (uid = type:reaperIdx OR type:pos)
+local function parseLaneInfo()
+  local raw = getProjectChunkMarkerSection()
+  if raw == "" then return {}, {} end
+
+  local laneNames = {}
+  local markerLaneOf = {}
+
+  for line in raw:gmatch("[^\n]+") do
+    -- Try several lane-name patterns; if any matches, store it.
+    -- Pattern A: LANE idx "name" color
+    local idx, name = line:match('^LANE%s+(%-?%d+)%s+"([^"]*)"')
+    if idx and name then
+      laneNames[tonumber(idx)] = name
+    end
+    -- Pattern B: MARKERLANE idx ... "name"
+    idx, name = line:match('^MARKERLANE%s+(%-?%d+).-"([^"]*)"')
+    if idx and name then
+      laneNames[tonumber(idx)] = name
+    end
+    -- Pattern C: RULERLANE / RULER_LANE idx "name"
+    idx, name = line:match('^RULER[_]?LANE%s+(%-?%d+).-"([^"]*)"')
+    if idx and name then
+      laneNames[tonumber(idx)] = name
+    end
+
+    -- MARKER line — figure out marker index and trailing lane (last integer
+    -- on the line after the GUID block). We capture marker idx and the LAST
+    -- standalone integer that appears AFTER the closing "}" of the GUID.
+    local mIdx = line:match('^MARKER%s+(%-?%d+)%s')
+    if mIdx then
+      local afterGuid = line:match('}([^{}]*)$')
+      if afterGuid then
+        local tail = {}
+        for n in afterGuid:gmatch('(%-?%d+)') do tail[#tail+1] = tonumber(n) end
+        -- last integer = lane idx (best guess)
+        if #tail >= 1 then
+          markerLaneOf[tonumber(mIdx)] = tail[#tail]
+        end
+      end
+    end
+  end
+
+  return laneNames, markerLaneOf
+end
+
+-- ════════════════════════════════════════════════════════════════════════
 --  Marker / region enumeration
 -- ════════════════════════════════════════════════════════════════════════
 local function enumItems()
@@ -112,12 +187,13 @@ local function enumItems()
     local retval, isrgn, pos, rgnend, name, idx, color = r.EnumProjectMarkers3(0, i)
     if retval > 0 then
       items[#items+1] = {
-        type   = isrgn and "r" or "m",
-        pos    = pos,
-        endPos = isrgn and rgnend or nil,
-        name   = name or "",
-        idx    = idx,
-        color  = color or 0,
+        type    = isrgn and "r" or "m",
+        pos     = pos,
+        endPos  = isrgn and rgnend or nil,
+        name    = name or "",
+        idx     = idx,
+        color   = color or 0,
+        laneIdx = nil,   -- filled in by attachLanes if parsing succeeds
       }
     end
   end
@@ -128,25 +204,66 @@ local function enumItems()
   return items
 end
 
-local function laneKey(item)  return item.type .. ":" .. tostring(item.color) end
+-- Try to attach a lane index to each item. Returns the laneNames table (may
+-- be empty if no names were found). The "lane mode" of the GUI is then:
+--   * If any item has a lane assignment AND laneNames has any entries → use
+--     lane-based grouping.
+--   * Otherwise → fall back to grouping by colour.
+local function attachLanes(items)
+  local laneNames, markerLaneOf = parseLaneInfo()
+  for _, it in ipairs(items) do
+    it.laneIdx = markerLaneOf[it.idx]
+  end
+  return laneNames
+end
 
-local function groupLanes(items)
+local function laneKeyForItem(it, byLane)
+  if byLane and it.laneIdx ~= nil then
+    return "L:" .. tostring(it.laneIdx)
+  end
+  return it.type .. ":" .. tostring(it.color)
+end
+
+local function groupLanes(items, laneNames)
+  -- Decide mode: use lanes if at least one item has a laneIdx AND we have
+  -- at least one named lane (otherwise the trailing-integer guess may be
+  -- mis-parsing the GUID flags).
+  local anyLane, namedLanes = false, false
+  for _, it in ipairs(items) do
+    if it.laneIdx ~= nil then anyLane = true; break end
+  end
+  for _ in pairs(laneNames or {}) do namedLanes = true; break end
+  local byLane = anyLane and namedLanes
+
   local lanes, seen = {}, {}
   for _, it in ipairs(items) do
-    local k = laneKey(it)
+    local k = laneKeyForItem(it, byLane)
     if not seen[k] then
-      seen[k] = { key = k, type = it.type, color = it.color, items = {}, sample = {} }
-      lanes[#lanes+1] = seen[k]
+      local L = { key = k, items = {}, sample = {}, byLane = byLane }
+      if byLane then
+        L.laneIdx = it.laneIdx
+        L.name    = (laneNames and laneNames[it.laneIdx]) or ("Lane " .. tostring(it.laneIdx))
+      else
+        L.type  = it.type
+        L.color = it.color
+      end
+      seen[k] = L
+      lanes[#lanes+1] = L
     end
     local L = seen[k]
     L.items[#L.items+1] = it
     if #L.sample < 3 and it.name ~= "" then L.sample[#L.sample+1] = it.name end
   end
-  table.sort(lanes, function(a, b)
-    if a.type ~= b.type then return a.type == "r" end  -- regions first
-    return (a.color or 0) > (b.color or 0)
-  end)
-  return lanes
+
+  if byLane then
+    table.sort(lanes, function(a, b) return (a.laneIdx or 0) < (b.laneIdx or 0) end)
+  else
+    table.sort(lanes, function(a, b)
+      if a.type ~= b.type then return a.type == "r" end
+      return (a.color or 0) > (b.color or 0)
+    end)
+  end
+  return lanes, byLane
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -177,9 +294,9 @@ local function trimDisplayName(name, prefix)
   return (name:match("^%s*(.-)%s*$")) or name
 end
 
-local function classify(items, blacklist)
+local function classify(items, blacklist, byLane)
   for _, it in ipairs(items) do
-    local k = laneKey(it)
+    local k = laneKeyForItem(it, byLane)
     local laneMatch   = proj.laneSong[k] == true
     local regionMatch = prefs.regionAsSong and it.type == "r"
     local prefixMatch = prefs.prefix ~= "" and it.name:sub(1, #prefs.prefix) == prefs.prefix
@@ -498,13 +615,15 @@ end
 -- ════════════════════════════════════════════════════════════════════════
 local function buildRowsAndStats()
   local items     = enumItems()
+  local laneNames = attachLanes(items)
+  local _, byLane = groupLanes(items, laneNames)
   local blacklist = parseBlacklist(prefs.blacklist)
-  classify(items, blacklist)
+  classify(items, blacklist, byLane)
 
   -- Filter by include-lanes
   local visible = {}
   for _, it in ipairs(items) do
-    if proj.laneInclude[laneKey(it)] ~= false then  -- default = included
+    if proj.laneInclude[laneKeyForItem(it, byLane)] ~= false then  -- default = included
       visible[#visible+1] = it
     end
   end
@@ -685,6 +804,9 @@ local function colorSwatch(reaperColor)
 end
 
 local function laneLabel(L)
+  if L.byLane then
+    return string.format("%s — %d items", L.name or "(unnamed)", #L.items)
+  end
   local typeLabel = (L.type == "r") and "Regions" or "Markers"
   local colorLabel
   if (L.color or 0) == 0 then
@@ -696,7 +818,7 @@ local function laneLabel(L)
   return string.format("%s %s — %d items", typeLabel, colorLabel, #L.items)
 end
 
-local function drawLaneTable(lanes)
+local function drawLaneTable(lanes, byLane)
   if #lanes == 0 then
     r.ImGui_TextDisabled(ctx, "No markers or regions in this project.")
     return
@@ -705,7 +827,7 @@ local function drawLaneTable(lanes)
        r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
     r.ImGui_TableSetupColumn(ctx, "Inc",    r.ImGui_TableColumnFlags_WidthFixed(), 40)
     r.ImGui_TableSetupColumn(ctx, "Song",   r.ImGui_TableColumnFlags_WidthFixed(), 50)
-    r.ImGui_TableSetupColumn(ctx, "Lane",   r.ImGui_TableColumnFlags_WidthFixed(), 220)
+    r.ImGui_TableSetupColumn(ctx, "Lane",   r.ImGui_TableColumnFlags_WidthFixed(), 260)
     r.ImGui_TableSetupColumn(ctx, "Sample names")
     r.ImGui_TableHeadersRow(ctx)
     for _, L in ipairs(lanes) do
@@ -722,10 +844,12 @@ local function drawLaneTable(lanes)
       if chgS then proj.laneSong[L.key] = vS; projDirty = true end
 
       r.ImGui_TableSetColumnIndex(ctx, 2)
-      local swatch = colorSwatch(L.color)
-      r.ImGui_ColorButton(ctx, "##sw"..L.key, swatch,
-        r.ImGui_ColorEditFlags_NoTooltip() | r.ImGui_ColorEditFlags_NoPicker(), 14, 14)
-      r.ImGui_SameLine(ctx)
+      if not L.byLane then
+        local swatch = colorSwatch(L.color)
+        r.ImGui_ColorButton(ctx, "##sw"..L.key, swatch,
+          r.ImGui_ColorEditFlags_NoTooltip() | r.ImGui_ColorEditFlags_NoPicker(), 14, 14)
+        r.ImGui_SameLine(ctx)
+      end
       r.ImGui_Text(ctx, laneLabel(L))
 
       r.ImGui_TableSetColumnIndex(ctx, 3)
@@ -733,6 +857,22 @@ local function drawLaneTable(lanes)
     end
     r.ImGui_EndTable(ctx)
   end
+end
+
+-- Debug: copy the marker-related lines of the project chunk to the
+-- clipboard so the user can share the format for further parsing work.
+local function dumpChunkToClipboard()
+  if not r.CF_SetClipboard then
+    state.status = "Debug dump requires SWS (CF_SetClipboard)."
+    return
+  end
+  local raw = getProjectChunkMarkerSection()
+  if raw == "" then
+    state.status = "Project chunk is empty (unsaved project?)."
+    return
+  end
+  r.CF_SetClipboard(raw)
+  state.status = "Copied marker chunk lines to clipboard — paste them back to me."
 end
 
 local function drawGUI()
@@ -757,28 +897,37 @@ local function drawGUI()
   local chgR, vR = r.ImGui_Checkbox(ctx, "Regions count as songs", prefs.regionAsSong)
   if chgR then prefs.regionAsSong = vR; prefsDirty = true end
 
-  -- Prefix
-  r.ImGui_PushItemWidth(ctx, 120)
-  local chgP, vP = r.ImGui_InputText(ctx, "Song prefix trigger", prefs.prefix or "")
+  -- Prefix (label before field)
+  r.ImGui_Text(ctx, "Song prefix trigger:")
+  r.ImGui_SameLine(ctx)
+  r.ImGui_PushItemWidth(ctx, 100)
+  local chgP, vP = r.ImGui_InputText(ctx, "##prefix", prefs.prefix or "")
   if chgP then prefs.prefix = vP; prefsDirty = true end
   r.ImGui_PopItemWidth(ctx)
   r.ImGui_SameLine(ctx)
   r.ImGui_TextDisabled(ctx, "(empty = off; e.g. \"*\" or \"♪\")")
 
-  -- Blacklist
-  r.ImGui_PushItemWidth(ctx, 460)
-  local chgB, vB = r.ImGui_InputText(ctx, "Blacklist", prefs.blacklist or "")
+  -- Blacklist (label before field, full width)
+  r.ImGui_Text(ctx, "Blacklist (comma-separated; case-insensitive substring; vetoes any song match):")
+  r.ImGui_PushItemWidth(ctx, -1)
+  local chgB, vB = r.ImGui_InputText(ctx, "##blacklist", prefs.blacklist or "")
   if chgB then prefs.blacklist = vB; prefsDirty = true end
   r.ImGui_PopItemWidth(ctx)
-  r.ImGui_TextDisabled(ctx, "Comma-separated; case-insensitive substring match. Vetoes a song match.")
 
   r.ImGui_Separator(ctx)
-  r.ImGui_Text(ctx, "Lanes (grouped by type + colour):")
-  r.ImGui_TextDisabled(ctx, "  Inc = include in export    Song = treat this lane as songs")
 
-  local items = enumItems()
-  local lanes = groupLanes(items)
-  drawLaneTable(lanes)
+  -- Lane table — uses Reaper-7 named lanes if detectable in the project
+  -- chunk, otherwise groups by (type + colour) as a fallback.
+  local items     = enumItems()
+  local laneNames = attachLanes(items)
+  local lanes, byLane = groupLanes(items, laneNames)
+  if byLane then
+    r.ImGui_Text(ctx, "Lanes (from project ruler lanes):")
+  else
+    r.ImGui_Text(ctx, "Lanes (grouped by type + colour — no named lanes detected):")
+  end
+  r.ImGui_TextDisabled(ctx, "  Inc = include in export    Song = treat this lane as songs")
+  drawLaneTable(lanes, byLane)
 
   r.ImGui_Separator(ctx)
 
@@ -791,6 +940,7 @@ local function drawGUI()
   if r.CF_SetClipboard then
     if r.ImGui_Button(ctx, "Copy as Text", 120, 28) then exportText() end
     r.ImGui_SameLine(ctx)
+    if r.ImGui_Button(ctx, "Debug: dump chunk", 150, 28) then dumpChunkToClipboard() end
   end
 
   r.ImGui_Spacing(ctx)

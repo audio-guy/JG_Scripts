@@ -11,6 +11,10 @@
         <changelog><![CDATA[Initial release — exports the project's markers and regions as a printable PDF setlist. Song detection combines four strategies (Song-Lane by colour, Regions=Songs, prefix trigger, blacklist veto). Time base H:MM:SS or bar.beat. Songs rendered bold with running number; length shown for songs only (region: end-start; marker: until next song). Footer with song count, net-music, gross duration. PDF saved next to .rpp and opened in the OS reader; no external dependencies (Helvetica/Helvetica-Bold built in). Optional "Save As…" (requires js_ReaScriptAPI) and "Copy as Text" (requires SWS).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.0.1" author="Julius Gass">
+        <changelog><![CDATA[GUI: labels now appear BEFORE their input fields (prefix trigger, blacklist) so it's clear which control is which. Lanes: try to parse Reaper-7 named ruler lanes from the project chunk and group by lane name when available — falls back to (type + colour) grouping when no named lanes are detected. Adds a "Debug: dump chunk" button (SWS) that copies the project's marker/lane chunk lines to the clipboard for diagnosis of the lane format.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
