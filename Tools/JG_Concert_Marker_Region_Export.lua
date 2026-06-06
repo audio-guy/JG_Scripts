@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.0.3
+-- @version 1.0.4
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -145,50 +145,70 @@ local function getProjectChunkMarkerSection()
   return table.concat(lines, "\n")
 end
 
--- Parse marker chunk lines. Each MARKER line in v6 looks like:
---   MARKER idx pos "name" flags color id B {guid} laneOrZero
--- In Reaper 7+ with named lanes there is (according to community reports) an
--- additional trailing field carrying the lane index, plus a separate block
--- naming each lane. We try to match both. Returns:
---   laneNames     [laneIdx] = "Lane Name"   (may be empty)
---   markerLaneOf  [itemUid] = laneIdx       (uid = type:reaperIdx OR type:pos)
+-- Parse marker chunk lines. Reaper 7+ writes ruler lane definitions like:
+--   RULERLANE 1 4 Region 0 1 0
+--   RULERLANE 2 8 Marker 0 1 0
+--   RULERLANE 3 0 Songs 17668058 -1 0
+-- Lane names are NOT quoted when they fit a single word; quoted when they
+-- contain spaces. The fourth field is the lane name.
+--
+-- MARKER lines carry the lane index as the LAST integer on the line:
+--   MARKER 4 316.29… "Melane Mosaic Choir: …" 8 18390768 1 B {GUID} 0 3
+-- where flag bit &1 (4th field) means "is region" — markers and regions share
+-- the same MARKER token but have separate idx counters.
+-- Returns:
+--   laneNames     [laneIdx] = "Lane Name"
+--   markerLaneOf  ["m:"|"r:" .. idx] = laneIdx
 local function parseLaneInfo()
   local raw = getProjectChunkMarkerSection()
   if raw == "" then return {}, {} end
 
-  local laneNames = {}
+  local laneNames    = {}
   local markerLaneOf = {}
 
+  -- Read one token from a string (quoted "…" or bare \S+), returning
+  -- (token, remainder).
+  local function readToken(s)
+    s = s:match("^%s*(.*)$") or s
+    if s:sub(1, 1) == '"' then
+      local t, rest = s:match('^"([^"]*)"%s*(.*)$')
+      return t, rest or ""
+    end
+    local t, rest = s:match("^(%S+)%s*(.*)$")
+    return t, rest or ""
+  end
+
   for line in raw:gmatch("[^\n]+") do
-    -- Try several lane-name patterns; if any matches, store it.
-    -- Pattern A: LANE idx "name" color
-    local idx, name = line:match('^LANE%s+(%-?%d+)%s+"([^"]*)"')
-    if idx and name then
-      laneNames[tonumber(idx)] = name
-    end
-    -- Pattern B: MARKERLANE idx ... "name"
-    idx, name = line:match('^MARKERLANE%s+(%-?%d+).-"([^"]*)"')
-    if idx and name then
-      laneNames[tonumber(idx)] = name
-    end
-    -- Pattern C: RULERLANE / RULER_LANE idx "name"
-    idx, name = line:match('^RULER[_]?LANE%s+(%-?%d+).-"([^"]*)"')
-    if idx and name then
-      laneNames[tonumber(idx)] = name
+    -- RULERLANE <idx> <flag> <name> <color> <…>
+    local laneIdxStr, after = line:match("^RULERLANE%s+(%-?%d+)%s+(.+)$")
+    if laneIdxStr and after then
+      local _flag, rest = readToken(after)        -- skip the flag/type field
+      local name        = readToken(rest)
+      if name and name ~= "" then
+        laneNames[tonumber(laneIdxStr)] = name
+      end
     end
 
-    -- MARKER line — figure out marker index and trailing lane (last integer
-    -- on the line after the GUID block). We capture marker idx and the LAST
-    -- standalone integer that appears AFTER the closing "}" of the GUID.
-    local mIdx = line:match('^MARKER%s+(%-?%d+)%s')
-    if mIdx then
-      local afterGuid = line:match('}([^{}]*)$')
-      if afterGuid then
-        local tail = {}
-        for n in afterGuid:gmatch('(%-?%d+)') do tail[#tail+1] = tonumber(n) end
-        -- last integer = lane idx (best guess)
-        if #tail >= 1 then
-          markerLaneOf[tonumber(mIdx)] = tail[#tail]
+    -- MARKER <idx> <pos> <name> <flags> <color> 1 B {GUID} <…> <laneIdx>
+    local mIdxStr = line:match("^MARKER%s+(%-?%d+)%s")
+    if mIdxStr then
+      local guidEnd = line:find("}", 1, true)
+      if guidEnd then
+        local tail = line:sub(guidEnd + 1)
+        local last
+        for n in tail:gmatch("(%-?%d+)") do last = tonumber(n) end
+        if last then
+          -- Determine isRegion from the flags field (bit 1).
+          local isRegion = false
+          local afterMarker = line:match("^MARKER%s+%-?%d+%s+[%-%d%.]+%s+(.+)$")
+          if afterMarker then
+            local _name, restAfter = readToken(afterMarker)
+            local flagStr = restAfter:match("^(%-?%d+)")
+            if flagStr then
+              isRegion = (tonumber(flagStr) & 1) ~= 0
+            end
+          end
+          markerLaneOf[(isRegion and "r:" or "m:") .. mIdxStr] = last
         end
       end
     end
@@ -232,7 +252,7 @@ end
 local function attachLanes(items)
   local laneNames, markerLaneOf = parseLaneInfo()
   for _, it in ipairs(items) do
-    it.laneIdx = markerLaneOf[it.idx]
+    it.laneIdx = markerLaneOf[(it.type == "r" and "r:" or "m:") .. tostring(it.idx)]
   end
   return laneNames
 end

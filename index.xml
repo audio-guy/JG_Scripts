@@ -23,6 +23,10 @@
         <changelog><![CDATA[Fix blacklist over-matching: blacklist words now match only when the marker name STARTS with that word followed by a word boundary, instead of substring-matching anywhere. Previously a generic "Intro" entry would falsely veto song markers like "Élida Almeida: Intro zu Txika"; now only categorical names like "Intro", "Intro 1", "Beifall …", "Ansage Maude" get vetoed. GUI label updated to reflect the new behaviour.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.0.4" author="Julius Gass">
+        <changelog><![CDATA[Lane name detection now actually works: parse the project chunk's RULERLANE entries with the real format Reaper 7+ uses ("RULERLANE idx flag name color …" — name is unquoted for single-word lanes, quoted otherwise). Reaper-7-named lanes ("Songs", "Marker", "Region") now appear by name in the GUI's lane table; the color/type fallback only kicks in when no named lanes exist. Marker-lane lookup keyed by (type, idx) so markers and regions sharing index numbers don't collide.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
