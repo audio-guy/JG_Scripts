@@ -19,6 +19,10 @@
         <changelog><![CDATA[Fix crash on startup when SWS is not installed: GetProjectStateChunk does not exist in stock Reaper. Falls back to reading the .rpp file directly (works for any saved project). Debug dump now also works without SWS — writes a "chunk-dump.txt" next to the .rpp instead of using the clipboard.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.0.3" author="Julius Gass">
+        <changelog><![CDATA[Fix blacklist over-matching: blacklist words now match only when the marker name STARTS with that word followed by a word boundary, instead of substring-matching anywhere. Previously a generic "Intro" entry would falsely veto song markers like "Élida Almeida: Intro zu Txika"; now only categorical names like "Intro", "Intro 1", "Beifall …", "Ansage Maude" get vetoed. GUI label updated to reflect the new behaviour.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">

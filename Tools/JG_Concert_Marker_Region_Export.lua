@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.0.2
+-- @version 1.0.3
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -298,11 +298,21 @@ local function parseBlacklist(s)
   return list
 end
 
+-- A blacklist entry vetoes a song match only if the marker name STARTS with
+-- that word (case-insensitive), followed by a word boundary or end-of-name.
+-- Anchored-at-start avoids false-positives like the "Intro" entry vetoing
+-- "Élida Almeida: Intro zu Txika" — categorical markers in practice always
+-- begin with the category word ("Beifall …", "Ansage …", "Intro", "Outro").
 local function isBlacklisted(name, blacklist)
   if not name or name == "" then return false end
-  local low = name:lower()
+  local low = (name:lower():match("^%s*(.-)%s*$")) or name:lower()
   for _, b in ipairs(blacklist) do
-    if low:find(b, 1, true) then return true end
+    if #b > 0 and #b <= #low and low:sub(1, #b) == b then
+      local nextCh = low:sub(#b + 1, #b + 1)
+      if nextCh == "" or not nextCh:match("[%w]") then
+        return true
+      end
+    end
   end
   return false
 end
@@ -937,7 +947,7 @@ local function drawGUI()
   r.ImGui_TextDisabled(ctx, "(empty = off; e.g. \"*\" or \"♪\")")
 
   -- Blacklist (label before field, full width)
-  r.ImGui_Text(ctx, "Blacklist (comma-separated; case-insensitive substring; vetoes any song match):")
+  r.ImGui_Text(ctx, "Blacklist (comma-separated; matches word at START of name; vetoes any song match):")
   r.ImGui_PushItemWidth(ctx, -1)
   local chgB, vB = r.ImGui_InputText(ctx, "##blacklist", prefs.blacklist or "")
   if chgB then prefs.blacklist = vB; prefsDirty = true end
