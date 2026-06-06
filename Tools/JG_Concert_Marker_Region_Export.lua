@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.0.1
+-- @version 1.0.2
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -108,9 +108,29 @@ end
 --  heuristically. We try several known token names and field positions; if
 --  none match, callers fall back to grouping by colour.
 -- ════════════════════════════════════════════════════════════════════════
+-- Get the raw project chunk. Native Reaper does NOT expose a function for
+-- this — GetProjectStateChunk only exists with SWS installed — so we fall
+-- back to reading the .rpp file directly (works for any saved project).
+local function getProjectChunk()
+  if r.GetProjectStateChunk then
+    local ok, chunk = r.GetProjectStateChunk(0, false)
+    if ok and chunk and chunk ~= "" then return chunk end
+  end
+  local _, path = r.EnumProjects(-1, "")
+  if path and path ~= "" then
+    local f = io.open(path, "rb")
+    if f then
+      local data = f:read("*a")
+      f:close()
+      return data or ""
+    end
+  end
+  return ""
+end
+
 local function getProjectChunkMarkerSection()
-  local ok, chunk = r.GetProjectStateChunk(0, false)
-  if not ok or not chunk then return "" end
+  local chunk = getProjectChunk()
+  if chunk == "" then return "" end
   local lines = {}
   for line in chunk:gmatch("[^\r\n]+") do
     local t = line:match("^%s*(.-)%s*$")
@@ -859,20 +879,29 @@ local function drawLaneTable(lanes, byLane)
   end
 end
 
--- Debug: copy the marker-related lines of the project chunk to the
--- clipboard so the user can share the format for further parsing work.
-local function dumpChunkToClipboard()
-  if not r.CF_SetClipboard then
-    state.status = "Debug dump requires SWS (CF_SetClipboard)."
-    return
-  end
+-- Debug: dump the marker-related lines of the project chunk so the user
+-- can share the format for further parsing work. Prefers clipboard (SWS)
+-- and falls back to writing a text file next to the .rpp.
+local function dumpChunk()
   local raw = getProjectChunkMarkerSection()
   if raw == "" then
-    state.status = "Project chunk is empty (unsaved project?)."
+    state.status = "Could not read project chunk (unsaved project? install SWS or save the .rpp)."
     return
   end
-  r.CF_SetClipboard(raw)
-  state.status = "Copied marker chunk lines to clipboard — paste them back to me."
+  if r.CF_SetClipboard then
+    r.CF_SetClipboard(raw)
+    state.status = "Copied marker chunk lines to clipboard — paste them back to me."
+    return
+  end
+  local dir = projectDir()
+  if dir == "" then dir = r.GetResourcePath() .. "/" end
+  local out = dir .. projectName() .. " - chunk-dump.txt"
+  local ok = writeFile(out, raw)
+  if ok then
+    state.status = "Chunk dump written to: " .. out
+  else
+    state.status = "Failed to write chunk dump."
+  end
 end
 
 local function drawGUI()
@@ -940,8 +969,8 @@ local function drawGUI()
   if r.CF_SetClipboard then
     if r.ImGui_Button(ctx, "Copy as Text", 120, 28) then exportText() end
     r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx, "Debug: dump chunk", 150, 28) then dumpChunkToClipboard() end
   end
+  if r.ImGui_Button(ctx, "Debug: dump chunk", 150, 28) then dumpChunk() end
 
   r.ImGui_Spacing(ctx)
   r.ImGui_TextWrapped(ctx, state.status or "")
