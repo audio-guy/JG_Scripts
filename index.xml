@@ -31,6 +31,10 @@
         <changelog><![CDATA[Live preview + per-row override: a scrollable preview pane below the lane table shows exactly what the PDF will contain. The "Song" checkbox per row overrides the auto-classification for that single marker (persists by marker GUID, survives renaming and moving). An asterisk after the name marks an active override; flipping the override back to the auto value removes it. Marker colour swatch in the PDF: a small coloured square left of the row number reflects each marker's Reaper colour (skipped for default-coloured markers). PDF column layout shifted 10pt right to make room.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
       </version>
+      <version name="1.1.1" author="Julius Gass">
+        <changelog><![CDATA[Fix crash in preview pane: ImGui_BeginChild's 5th argument is now child_flags (a number) instead of the old border boolean. Use ImGui_ChildFlags_Border() if available, else 0.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">

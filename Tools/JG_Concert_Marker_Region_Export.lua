@@ -1,6 +1,6 @@
 -- @description Concert Marker/Region Export (PDF)
 -- @author JG
--- @version 1.1.0
+-- @version 1.1.1
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -991,7 +991,8 @@ local function drawPreviewTable(rows)
     r.ImGui_TextDisabled(ctx, "(Nothing to preview — adjust lanes or save the project first.)")
     return
   end
-  if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, true) then
+  local childFlags = (r.ImGui_ChildFlags_Border and r.ImGui_ChildFlags_Border()) or 0
+  if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, childFlags) then
     if r.ImGui_BeginTable(ctx, "preview", 6,
          r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
       r.ImGui_TableSetupColumn(ctx, "",      r.ImGui_TableColumnFlags_WidthFixed(), 20)  -- swatch
