@@ -6,6 +6,13 @@
   <!-- ═══════════════════════════════════════════════════════════ -->
   <category name="Tools">
 
+    <reapack name="JG_Concert_Marker_Region_Export.lua" type="script" desc="JG Concert Marker/Region Export">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — exports the project's markers and regions as a printable PDF setlist. Song detection combines four strategies (Song-Lane by colour, Regions=Songs, prefix trigger, blacklist veto). Time base H:MM:SS or bar.beat. Songs rendered bold with running number; length shown for songs only (region: end-start; marker: until next song). Footer with song count, net-music, gross duration. PDF saved next to .rpp and opened in the OS reader; no external dependencies (Helvetica/Helvetica-Bold built in). Optional "Save As…" (requires js_ReaScriptAPI) and "Copy as Text" (requires SWS).]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Concert_Marker_Region_Export.lua</source>
+      </version>
+    </reapack>
+
     <reapack name="JG_Color_Items_By_Position.lua" type="script" desc="JG Color Items By Position">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release]]></changelog>
