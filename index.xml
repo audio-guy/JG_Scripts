@@ -213,12 +213,20 @@
         <changelog><![CDATA[Initial release — MIDI editor: moves selected notes up one VISIBLE ROW instead of one semitone. In a normally pitch-sorted map this equals one semitone (like stock action 40177); in a drum map with reordered rows (custom note row order, e.g. articulations grouped by instrument) it jumps to the next visible row ABOVE in display order, even across pitch gaps. Reads the track's CUSTOM_NOTE_ORDER from the state chunk (read-only); falls back to a one-semitone move when there is no custom order or the note sits on an unlisted row. Acts on all selected notes in the active MIDI editor take; the topmost row does not wrap. Pairs with JG_Move_Notes_Down_One_Visible_Row.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Move_Notes_Up_One_Visible_Row.lua</source>
       </version>
+      <version name="1.0.1" author="Julius Gass">
+        <changelog><![CDATA[Register the action in the MIDI Editor section instead of Main — this is a MIDI-editor-only action. After updating in ReaPack it appears under the "MIDI Editor" section of the action list, ready to bind to a key there (script unchanged).]]></changelog>
+        <source main="midi_editor">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Move_Notes_Up_One_Visible_Row.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Move_Notes_Down_One_Visible_Row.lua" type="script" desc="JG Move Notes Down One Visible Row">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release — MIDI editor: moves selected notes down one VISIBLE ROW instead of one semitone. In a normally pitch-sorted map this equals one semitone (like stock action 40178); in a drum map with reordered rows (custom note row order, e.g. articulations grouped by instrument) it jumps to the next visible row BELOW in display order, even across pitch gaps. Reads the track's CUSTOM_NOTE_ORDER from the state chunk (read-only); falls back to a one-semitone move when there is no custom order or the note sits on an unlisted row. Acts on all selected notes in the active MIDI editor take; the bottommost row does not wrap. Pairs with JG_Move_Notes_Up_One_Visible_Row.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Move_Notes_Down_One_Visible_Row.lua</source>
+      </version>
+      <version name="1.0.1" author="Julius Gass">
+        <changelog><![CDATA[Register the action in the MIDI Editor section instead of Main — this is a MIDI-editor-only action. After updating in ReaPack it appears under the "MIDI Editor" section of the action list, ready to bind to a key there (script unchanged).]]></changelog>
+        <source main="midi_editor">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Move_Notes_Down_One_Visible_Row.lua</source>
       </version>
     </reapack>
 
