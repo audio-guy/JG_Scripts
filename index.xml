@@ -230,6 +230,13 @@
       </version>
     </reapack>
 
+    <reapack name="JG_SRC_Source_Position_HUD.lua" type="script" desc="JG SRC Source Position HUD">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — floating ReaImGui HUD that shows the live SOURCE-FILE position (basename + H:MM:SS.mmm) under the edit/play cursor on a dedicated SRC track, plus the timeline position. A "Springe zu" field jumps to a typed source time (accepts 5:00, 1:02:03 or plain seconds via parse_timestr, Enter or button); the jump is computed from each SRC item's CURRENT position + start offset, so the same source time keeps landing on the same content after ripple cuts — unlike the native timeline-absolute "Go to time". On first start the single selected track is turned into the SRC anchor (renamed "SRC", coloured red, moved to the top and pinned via B_TCPPIN on REAPER 7.46+) after a confirm dialog; its GUID is stored in the project and recognised again across restarts, and a second invocation toggles the HUD closed. Target file is sticky so jumps work across gaps; MIDI takes are skipped; SECTION/reversed sources resolve to their parent for filename matching. Closing leaves the SRC track untouched; an in-HUD "SRC zurücksetzen" button removes name/colour/pin and clears the stored GUID. Requires ReaImGui. Note: leave SRC items un-glued, else the offset points into the glue file.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
+      </version>
+    </reapack>
+
   </category>
 
   <!-- ═══════════════════════════════════════════════════════════ -->
