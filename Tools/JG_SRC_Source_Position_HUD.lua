@@ -1,6 +1,6 @@
 -- @description SRC Source Position HUD (live source-file position under cursor, edit-proof jump-to)
 -- @author JG
--- @version 1.0.0
+-- @version 1.0.1
 -- @about
 --   A floating HUD that shows, live, the SOURCE-FILE position under the edit
 --   (or play) cursor and lets you JUMP to a source position by typing it. The
@@ -15,8 +15,10 @@
 --   project so it is recognised again across restarts; a second invocation
 --   toggles the HUD closed.
 --
---   Pinning uses the native track attribute B_TCPPIN (REAPER 7.46+); on older
---   builds the track is still moved to the top, just not pinned.
+--   Pinning uses the native action 40000 "Track: Pin tracks to top of arrange
+--   view" (REAPER 7.46+), guarded by the B_TCPPIN state so re-runs never toggle
+--   it off; other pins (incl. the master) are untouched. On older builds the
+--   track is still moved to the top, just not pinned.
 --
 --   Tip: leave the SRC items UN-glued while editing — a glued item's offset
 --   would point into the glue file, not the original source.
@@ -107,12 +109,19 @@ local function applySRCStyle(tr)
     r.ReorderSelectedTracks(0, 0)
     restoreSel(sel)
   end
-  -- Pin to top of TCP (REAPER 7.46+). pcall guards older builds without B_TCPPIN.
-  pcall(function()
-    if r.GetMediaTrackInfo_Value(tr, "B_TCPPIN") ~= 1 then
-      r.SetMediaTrackInfo_Value(tr, "B_TCPPIN", 1)
-    end
-  end)
+  -- Pin to top (REAPER 7.46+). 40000 = "Track: Pin tracks to top of arrange
+  -- view" — leaves other pins (incl. the master) intact, unlike 40008. Guarded
+  -- by the B_TCPPIN state so an already-pinned SRC is never toggled back off;
+  -- the getter pcall also no-ops cleanly on pre-7.46 builds (40000 is unassigned
+  -- there, so the Main_OnCommand is harmless).
+  local alreadyPinned = false
+  pcall(function() alreadyPinned = r.GetMediaTrackInfo_Value(tr, "B_TCPPIN") == 1 end)
+  if not alreadyPinned then
+    local sel = saveSel()
+    r.SetOnlyTrackSelected(tr)
+    r.Main_OnCommand(40000, 0)   -- Track: Pin tracks to top of arrange view
+    restoreSel(sel)
+  end
   r.PreventUIRefresh(-1)
   r.TrackList_AdjustWindows(false)
 end
