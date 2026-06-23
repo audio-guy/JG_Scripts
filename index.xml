@@ -263,6 +263,10 @@
         <changelog><![CDATA[Fix: the input field lost keyboard focus after Enter (ImGui's EnterReturnsTrue deactivates the field), so cycling through duplicate occurrences required clicking the field again between presses. The field is now re-focused automatically after each Enter that keeps the window open, so repeated Enter cycles without re-clicking.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
+      <version name="1.3.0" author="Julius Gass">
+        <changelog><![CDATA[Respect the project length limit: when "Limit project length" is enabled in the project settings, SRC occurrences beyond that limit are ignored — jumps and the duplicate-cycle stay within the limit, and parked material past the end is skipped. The limit is read from the saved .rpp file (MAXPROJLEN token), because the project chunk is not reachable via the ReaScript API; so save the project after changing the limit. When a limit is active the window shows it ("Project limit: H:MM:SS"). No limit set / project unsaved → no filtering, as before.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>

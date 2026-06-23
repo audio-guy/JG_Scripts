@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (edit-proof source jump + SRC setup, one window)
 -- @author JG
--- @version 1.2.1
+-- @version 1.3.0
 -- @provides [main] .
 -- @about
 --   A small, keyboard-first "Jump to" dialog that jumps the edit cursor to a
@@ -33,6 +33,11 @@
 --   in a gap, the file last jumped to, or — if the SRC track holds a single
 --   source — that one. "Reset SRC" removes the SRC marking again.
 --
+--   If "Limit project length" is enabled in the project settings, occurrences
+--   beyond that limit are ignored (jumps and the duplicate cycle stay within it).
+--   The limit is read from the SAVED .rpp (the project chunk is not reachable via
+--   ReaScript), so save the project after changing it.
+--
 --   Tip: leave the SRC items UN-glued while editing — a glued item's offset
 --   would point into the glue file, not the original source.
 --
@@ -41,7 +46,7 @@
 
 local r = reaper
 
-local VERSION   = "1.2.1"
+local VERSION   = "1.3.0"
 local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
 
 if not r.ImGui_CreateContext then
@@ -178,6 +183,33 @@ r.atexit(function() r.SetExtState(SECTION, RUN_FLAG, "0", false) end)
 --    src = offs + (cursor - pos) * rate ;  t = pos + (s - offs) / rate
 --    hit:  offs <= s < offs + D_LENGTH * rate
 -- ════════════════════════════════════════════════════════════════════════
+-- "Limit project length" from the SAVED .rpp (MAXPROJLEN <enable> <seconds>),
+-- in seconds, or math.huge if disabled/absent/unsaved. The project chunk is not
+-- reachable via the ReaScript chunk API, so the file is read directly — meaning
+-- the limit only updates after the project is saved.
+local function projectLimit()
+  local _, projfn = r.EnumProjects(-1)
+  if not projfn or projfn == "" then return math.huge end
+  local f = io.open(projfn, "r")
+  if not f then return math.huge end
+  local limit = math.huge
+  for line in f:lines() do
+    local en, secs = line:match("^%s*MAXPROJLEN%s+(%-?%d+)%s+([%d%.]+)")
+    if en then
+      if en == "1" then
+        local v = tonumber(secs)
+        if v and v > 0 then limit = v end
+      end
+      break
+    end
+    if line:find("^%s*<TRACK") then break end   -- past the project header
+  end
+  f:close()
+  return limit
+end
+
+local LIMIT = projectLimit()
+
 local function basename(p)
   return (p or ""):match("[^/\\]+$") or (p or "")
 end
@@ -199,6 +231,7 @@ local function refPos()
 end
 
 local function srcUnderCursor(track, cursor)
+  if cursor >= LIMIT then return nil, nil end   -- beyond the project limit
   for i = 0, r.CountTrackMediaItems(track) - 1 do
     local item = r.GetTrackMediaItem(track, i)
     local pos  = r.GetMediaItemInfo_Value(item, "D_POSITION")
@@ -229,7 +262,8 @@ local function timelinePositions(track, file, s)
       local offs = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
       local rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
       if s >= offs and s < offs + len * rate then
-        list[#list + 1] = pos + (s - offs) / rate
+        local t = pos + (s - offs) / rate
+        if t < LIMIT then list[#list + 1] = t end   -- skip matches beyond the limit
       end
     end
   end
@@ -249,8 +283,11 @@ end
 local function distinctSourceFiles(track)
   local seen, list = {}, {}
   for i = 0, r.CountTrackMediaItems(track) - 1 do
-    local f = takeSourceFile(r.GetActiveTake(r.GetTrackMediaItem(track, i)))
-    if f ~= "" and not seen[f] then seen[f] = true; list[#list + 1] = f end
+    local item = r.GetTrackMediaItem(track, i)
+    if r.GetMediaItemInfo_Value(item, "D_POSITION") < LIMIT then   -- ignore parked items
+      local f = takeSourceFile(r.GetActiveTake(item))
+      if f ~= "" and not seen[f] then seen[f] = true; list[#list + 1] = f end
+    end
   end
   return list
 end
@@ -378,6 +415,9 @@ local function draw()
     r.ImGui_TextColored(ctx, 0x80C0FFFF, "Target source: " .. basename(file))
   else
     r.ImGui_TextColored(ctx, 0xFF8080FF, "Target source: — (none detected)")
+  end
+  if LIMIT ~= math.huge then
+    r.ImGui_TextColored(ctx, 0x909090FF, "Project limit: " .. fmt(LIMIT) .. "  (material beyond ignored)")
   end
   r.ImGui_Spacing(ctx)
 
