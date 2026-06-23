@@ -1,17 +1,21 @@
--- @description SRC Jump To Source Position (keyboard-first jump dialog, edit-proof)
+-- @description SRC Jump To Source Position (edit-proof source jump + SRC setup, one window)
 -- @author JG
--- @version 1.0.3
+-- @version 1.1.0
 -- @provides [main] .
 -- @about
---   A small "Jump to" dialog (like REAPER's native action 40069) that jumps the
---   edit cursor to a SOURCE-file position on the SRC track. Unlike 40069 — which
---   is timeline-absolute — the target is computed from the SRC item's CURRENT
+--   A small, keyboard-first "Jump to" dialog that jumps the edit cursor to a
+--   SOURCE-file position on a dedicated SRC track. Unlike REAPER's native 40069
+--   (timeline-absolute), the target is computed from the SRC item's CURRENT
 --   position + start offset, so the same source time keeps landing on the same
 --   content after ripple cuts and moves.
 --
---   Made to be bound to a shortcut: the input field is auto-focused so you can
---   type immediately, Enter jumps and closes the window, Esc cancels. A not-found
---   time keeps the window open with a message so you can correct it.
+--   Self-contained, made to be bound to a shortcut:
+--     * On first use it turns the single selected track into the SRC anchor
+--       (renamed "SRC", coloured red, moved to the top and pinned via the native
+--       action 40000 on REAPER 7.46+). Its GUID is stored in the project, so it
+--       is recognised again across restarts; later runs go straight to the jump.
+--     * The input field is auto-focused so you can type immediately, Enter jumps
+--       and closes, Esc cancels. A not-found time keeps the window open.
 --
 --   Accepted input (the source-meaningful subset of 40069):
 --     mmss / hhmmss   compact digit run, e.g. 1126 = 11:26, 021126 = 2:11:26
@@ -21,15 +25,18 @@
 --     +val / -val     relative to the current source position under the cursor
 --
 --   Target file = the SRC source under the edit/play cursor; if the cursor sits
---   in a gap, the last file seen (shared with the HUD via project ExtState) or —
---   if the SRC track holds a single source — that one. Requires an SRC track set
---   up by JG_SRC_Source_Position_HUD, and ReaImGui. js_ReaScriptAPI is optional
---   but strongly recommended: on macOS it lets the window grab keyboard focus so
---   you can type immediately.
+--   in a gap, the file last jumped to, or — if the SRC track holds a single
+--   source — that one. "Reset SRC" removes the SRC marking again.
+--
+--   Tip: leave the SRC items UN-glued while editing — a glued item's offset
+--   would point into the glue file, not the original source.
+--
+--   Requires ReaImGui. js_ReaScriptAPI is optional but strongly recommended: on
+--   macOS it lets the window grab keyboard focus so you can type immediately.
 
 local r = reaper
 
-local VERSION   = "1.0.3"
+local VERSION   = "1.1.0"
 local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
 
 if not r.ImGui_CreateContext then
@@ -45,9 +52,19 @@ local HAS_JS = (r.JS_Window_Find ~= nil) and (r.JS_Window_SetFocus ~= nil)
 local SECTION  = "SRC_HUD"
 local KEY_GUID = "track_guid"
 local KEY_LAST = "last_file"
+local RUN_FLAG = "jump_running"
 
 -- ════════════════════════════════════════════════════════════════════════
---  Shared helpers (same maths as the HUD)
+--  Single-window guard: if a dialog is already open, just refocus it
+-- ════════════════════════════════════════════════════════════════════════
+if r.GetExtState(SECTION, RUN_FLAG) == "1" then
+  local hwnd = HAS_JS and r.JS_Window_Find(WIN_TITLE, true) or nil
+  if hwnd then r.JS_Window_SetFocus(hwnd); return end
+  -- otherwise the flag is stale (previous instance died) → fall through and reopen
+end
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Track helpers
 -- ════════════════════════════════════════════════════════════════════════
 local function findTrackByGUID(guid)
   if not guid or guid == "" then return nil end
@@ -56,6 +73,17 @@ local function findTrackByGUID(guid)
     if r.GetTrackGUID(tr) == guid then return tr end
   end
   return nil
+end
+
+local function saveSel()
+  local s = {}
+  for i = 0, r.CountSelectedTracks(0) - 1 do s[#s + 1] = r.GetSelectedTrack(0, i) end
+  return s
+end
+
+local function restoreSel(s)
+  for i = 0, r.CountTracks(0) - 1 do r.SetTrackSelected(r.GetTrack(0, i), false) end
+  for _, tr in ipairs(s) do r.SetTrackSelected(tr, true) end
 end
 
 local function takeSourceFile(take)
@@ -69,6 +97,82 @@ local function takeSourceFile(take)
   return r.GetMediaSourceFileName(src, "")
 end
 
+-- Apply the SRC look idempotently; only touches what is off (no flicker if clean).
+local function applySRCStyle(tr)
+  local changed = false
+  r.PreventUIRefresh(1)
+  local _, nm = r.GetTrackName(tr)
+  if nm ~= "SRC" then
+    r.GetSetMediaTrackInfo_String(tr, "P_NAME", "SRC", true); changed = true
+  end
+  local wantColor = r.ColorToNative(255, 0, 0) | 0x1000000
+  if r.GetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR") ~= wantColor then
+    r.SetMediaTrackInfo_Value(tr, "I_CUSTOMCOLOR", wantColor); changed = true
+  end
+  if r.GetMediaTrackInfo_Value(tr, "IP_TRACKNUMBER") ~= 1 then  -- not already on top
+    local sel = saveSel()
+    r.SetOnlyTrackSelected(tr)
+    r.ReorderSelectedTracks(0, 0)
+    restoreSel(sel); changed = true
+  end
+  -- Pin to top (REAPER 7.46+). 40000 = "Track: Pin tracks to top of arrange view"
+  -- — leaves other pins (incl. master) intact, unlike 40008. Guarded by B_TCPPIN
+  -- so an already-pinned SRC is never toggled off; no-ops on pre-7.46 builds.
+  local alreadyPinned = false
+  pcall(function() alreadyPinned = r.GetMediaTrackInfo_Value(tr, "B_TCPPIN") == 1 end)
+  if not alreadyPinned then
+    local sel = saveSel()
+    r.SetOnlyTrackSelected(tr)
+    r.Main_OnCommand(40000, 0)
+    restoreSel(sel); changed = true
+  end
+  r.PreventUIRefresh(-1)
+  if changed then r.TrackList_AdjustWindows(false) end
+  return changed
+end
+
+-- Resolve the SRC track: stored GUID (re-styled idempotently) or set up the
+-- single selected track after a confirm. Returns track or nil.
+local function setupSRC()
+  local _, guid = r.GetProjExtState(0, SECTION, KEY_GUID)
+  local tr = findTrackByGUID(guid)
+  if tr then
+    r.Undo_BeginBlock()
+    applySRCStyle(tr)
+    r.Undo_EndBlock("SRC Jump: re-apply SRC styling", -1)
+    return tr
+  end
+  if r.CountSelectedTracks(0) ~= 1 then
+    r.MB("No SRC track set up yet.\n\n" ..
+         "Select exactly one source track and run the script again to set it up.",
+         "SRC Jump", 0)
+    return nil
+  end
+  tr = r.GetSelectedTrack(0, 0)
+  local _, nm = r.GetTrackName(tr)
+  if r.MB(("Set up the selected track \"%s\" as the SRC track?"):format(nm), "SRC Jump", 4) ~= 6 then
+    return nil
+  end
+  r.Undo_BeginBlock()
+  applySRCStyle(tr)
+  r.SetProjExtState(0, SECTION, KEY_GUID, r.GetTrackGUID(tr))
+  r.Undo_EndBlock("SRC Jump: set up track as SRC", -1)
+  return tr
+end
+
+local srcTrack = setupSRC()
+if not srcTrack then return end
+local srcGUID = r.GetTrackGUID(srcTrack)
+
+-- Claim the single-window slot and make sure it is released on close.
+r.SetExtState(SECTION, RUN_FLAG, "1", false)
+r.atexit(function() r.SetExtState(SECTION, RUN_FLAG, "0", false) end)
+
+-- ════════════════════════════════════════════════════════════════════════
+--  Position maths
+--    src = offs + (cursor - pos) * rate ;  t = pos + (s - offs) / rate
+--    hit:  offs <= s < offs + D_LENGTH * rate
+-- ════════════════════════════════════════════════════════════════════════
 local function basename(p)
   return (p or ""):match("[^/\\]+$") or (p or "")
 end
@@ -89,7 +193,6 @@ local function refPos()
   return r.GetCursorPosition()
 end
 
--- file + source position of the SRC item under a project-time cursor
 local function srcUnderCursor(track, cursor)
   for i = 0, r.CountTrackMediaItems(track) - 1 do
     local item = r.GetTrackMediaItem(track, i)
@@ -108,7 +211,6 @@ local function srcUnderCursor(track, cursor)
   return nil, nil
 end
 
--- timeline time of source position `s` in `file` on SRC; nearest to `cursor` on overlap
 local function timelineForSource(track, file, s, cursor)
   local bestT, bestDist = nil, math.huge
   for i = 0, r.CountTrackMediaItems(track) - 1 do
@@ -138,26 +240,14 @@ local function distinctSourceFiles(track)
   return list
 end
 
--- ════════════════════════════════════════════════════════════════════════
---  Resolve the SRC track and the target file
--- ════════════════════════════════════════════════════════════════════════
-local _, guid = r.GetProjExtState(0, SECTION, KEY_GUID)
-local srcTrack = findTrackByGUID(guid)
-if not srcTrack then
-  r.MB("No SRC track set up.\n\n" ..
-       "Start JG_SRC_Source_Position_HUD first and set up an SRC track.",
-       "SRC Jump", 0)
-  return
-end
-
 local function resolveTargetFile(cursor)
-  local f = srcUnderCursor(srcTrack, cursor)             -- 1) under the cursor
+  local f = srcUnderCursor(srcTrack, cursor)
   if f then return f end
-  local _, lf = r.GetProjExtState(0, SECTION, KEY_LAST)  -- 2) last seen (shared w/ HUD)
+  local _, lf = r.GetProjExtState(0, SECTION, KEY_LAST)
   if lf ~= "" then
     for _, x in ipairs(distinctSourceFiles(srcTrack)) do if x == lf then return lf end end
   end
-  local list = distinctSourceFiles(srcTrack)             -- 3) the only source on SRC
+  local list = distinctSourceFiles(srcTrack)
   if #list == 1 then return list[1] end
   return nil
 end
@@ -177,7 +267,6 @@ local function parseClock(str)
   return r.parse_timestr(str)
 end
 
--- "+5", "-1:02", compact "1126"/"021126", "2:11:26.310", "90.5" → source seconds
 local function parseTarget(str, baseSrcPos)
   str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if str == "" then return nil, "empty" end
@@ -190,7 +279,7 @@ local function parseTarget(str, baseSrcPos)
 end
 
 -- ════════════════════════════════════════════════════════════════════════
---  GUI — keyboard-first, auto-focused, Enter jumps + closes, Esc cancels
+--  GUI
 -- ════════════════════════════════════════════════════════════════════════
 local ctx  = r.ImGui_CreateContext("JG SRC Jump")
 local font = r.ImGui_CreateFont("sans-serif", 14)
@@ -215,14 +304,37 @@ local function doJump()
   local t = timelineForSource(srcTrack, file, s, cursor)
   if t then
     r.SetEditCurPos(t, true, false)
-    r.SetProjExtState(0, SECTION, KEY_LAST, file)     -- remember for next time
-    done = true                                        -- success → close
+    r.SetProjExtState(0, SECTION, KEY_LAST, file)
+    done = true
   else
     status = ("%s not found in %s"):format(fmt(s), basename(file))
   end
 end
 
+local function resetSRC()
+  if r.ValidatePtr2(0, srcTrack, "MediaTrack*") then
+    r.Undo_BeginBlock()
+    pcall(function() r.SetMediaTrackInfo_Value(srcTrack, "B_TCPPIN", 0) end)
+    r.SetMediaTrackInfo_Value(srcTrack, "I_CUSTOMCOLOR", 0)
+    r.GetSetMediaTrackInfo_String(srcTrack, "P_NAME", "", true)
+    r.Undo_EndBlock("SRC Jump: remove SRC marking", -1)
+    r.TrackList_AdjustWindows(false)
+  end
+  r.SetProjExtState(0, SECTION, KEY_GUID, "")
+  done = true   -- nothing to jump on anymore → close
+end
+
 local function draw()
+  if not r.ValidatePtr2(0, srcTrack, "MediaTrack*") then
+    srcTrack = findTrackByGUID(srcGUID)
+    if not srcTrack then
+      r.ImGui_TextColored(ctx, 0xFF6060FF, "SRC track no longer exists.")
+      r.ImGui_Spacing(ctx)
+      if r.ImGui_Button(ctx, "Close", 90, 0) then done = true end
+      return
+    end
+  end
+
   local file = resolveTargetFile(refPos())
   if file then
     r.ImGui_TextColored(ctx, 0x80C0FFFF, "Target source: " .. basename(file))
@@ -258,6 +370,8 @@ local function draw()
   if r.ImGui_Button(ctx, "OK", 90, 0) then enter = true end
   r.ImGui_SameLine(ctx)
   if r.ImGui_Button(ctx, "Cancel", 90, 0) then done = true end
+  r.ImGui_SameLine(ctx)
+  if r.ImGui_SmallButton(ctx, "Reset SRC") then resetSRC() end
 
   if enter then doJump() end
   if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then done = true end
@@ -278,16 +392,16 @@ local function loop()
   end
   r.ImGui_PopFont(ctx)
 
-  -- Force OS keyboard focus onto the window until the input is active. ImGui's
-  -- own SetNextWindowFocus is not enough on macOS when launched from an action;
-  -- js_ReaScriptAPI grabs the native window by title and makes it key.
+  -- Force OS keyboard focus until the input is active (macOS: ImGui's own focus
+  -- call is not enough when launched from an action; js_ReaScriptAPI makes the
+  -- native window key, found by its exact title).
   if needFocus and HAS_JS then
     local hwnd = r.JS_Window_Find(WIN_TITLE, true)
     if hwnd then r.JS_Window_SetFocus(hwnd) end
   end
 
   frames = frames + 1
-  if frames > 60 then needFocus = false end   -- give up forcing focus after ~1 s
+  if frames > 60 then needFocus = false end
   if open and not done then r.defer(loop) end
 end
 

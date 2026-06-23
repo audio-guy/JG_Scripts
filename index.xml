@@ -230,29 +230,6 @@
       </version>
     </reapack>
 
-    <reapack name="JG_SRC_Source_Position_HUD.lua" type="script" desc="JG SRC Source Position HUD">
-      <version name="1.0.0" author="Julius Gass">
-        <changelog><![CDATA[Initial release — floating ReaImGui HUD that shows the live SOURCE-FILE position (basename + H:MM:SS.mmm) under the edit/play cursor on a dedicated SRC track, plus the timeline position. A "Springe zu" field jumps to a typed source time (accepts 5:00, 1:02:03 or plain seconds via parse_timestr, Enter or button); the jump is computed from each SRC item's CURRENT position + start offset, so the same source time keeps landing on the same content after ripple cuts — unlike the native timeline-absolute "Go to time". On first start the single selected track is turned into the SRC anchor (renamed "SRC", coloured red, moved to the top and pinned via B_TCPPIN on REAPER 7.46+) after a confirm dialog; its GUID is stored in the project and recognised again across restarts, and a second invocation toggles the HUD closed. Target file is sticky so jumps work across gaps; MIDI takes are skipped; SECTION/reversed sources resolve to their parent for filename matching. Closing leaves the SRC track untouched; an in-HUD "SRC zurücksetzen" button removes name/colour/pin and clears the stored GUID. Requires ReaImGui. Note: leave SRC items un-glued, else the offset points into the glue file.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
-      </version>
-      <version name="1.0.1" author="Julius Gass">
-        <changelog><![CDATA[Pin the SRC track via the native action 40000 "Track: Pin tracks to top of arrange view" (REAPER 7.46+) instead of writing B_TCPPIN directly. The action leaves other pins — including the master track — untouched (unlike 40008, which unpins all others). The call is guarded by the B_TCPPIN state so re-running the script never toggles an already-pinned SRC back off, and it no-ops cleanly on pre-7.46 builds where 40000 is unassigned (the track is still moved to the top, just not pinned).]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
-      </version>
-      <version name="1.0.2" author="Julius Gass">
-        <changelog><![CDATA[Share the last source file seen under the cursor with the new JG_SRC_Jump_To_Source_Position dialog via project ExtState ("last_file"), and seed the HUD's sticky file from it on start. This lets a shortcut-bound quick-jump target the file you were last hovering, even when the cursor sits in a gap. No change to the HUD's own behaviour otherwise.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
-      </version>
-      <version name="1.0.3" author="Julius Gass">
-        <changelog><![CDATA[Jump field now also understands compact digit-only times — mmss / hmmss / hhmmss (e.g. 1126 = 11:26, 021126 = 2:11:26) — in addition to h:mm:ss.xxx and plain seconds. A bare run of 4+ digits is read as compact time (last two = seconds, next two = minutes, the rest = hours); shorter numbers and any input with ":" or "." use REAPER's normal time parser. Matches the input of JG_SRC_Jump_To_Source_Position.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
-      </version>
-      <version name="1.0.4" author="Julius Gass">
-        <changelog><![CDATA[UI language switched to English and the version is now shown in the window title bar. No functional change.]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
-      </version>
-    </reapack>
-
     <reapack name="JG_SRC_Jump_To_Source_Position.lua" type="script" desc="JG SRC Jump To Source Position">
       <version name="1.0.0" author="Julius Gass">
         <changelog><![CDATA[Initial release — keyboard-first "Springe zu" dialog (à la native action 40069) made for a shortcut: the input field is auto-focused so you can type immediately, Enter jumps and closes the window, Esc cancels, and a not-found time keeps the window open so you can correct it. Jumps the edit cursor to a SOURCE position on the SRC track, computed from each item's CURRENT position + start offset — edit-proof, survives ripple cuts, unlike the timeline-absolute 40069. Accepts mm:ss.xxx, h:mm:ss.xxx, plain seconds and relative +/- (relative to the current source position under the cursor); the marker/region/measure/track-item syntaxes of 40069 are timeline concepts and are intentionally not supported. Target file = the SRC source under the cursor, else the file last seen (shared with the HUD via project ExtState), else the single source on the SRC track. Requires an SRC track set up by JG_SRC_Source_Position_HUD and ReaImGui.]]></changelog>
@@ -268,6 +245,10 @@
       </version>
       <version name="1.0.3" author="Julius Gass">
         <changelog><![CDATA[Fix keyboard focus on macOS for real: the window is now made the active OS window via js_ReaScriptAPI (JS_Window_SetFocus, found by title) until the input field is active, so you can type immediately and Enter jumps + closes. ImGui's own focus call alone did not grab OS focus when launched from an action. js_ReaScriptAPI is optional but strongly recommended for this. UI language switched to English and the version is shown in the window title bar.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
+      <version name="1.1.0" author="Julius Gass">
+        <changelog><![CDATA[Consolidated into a single self-contained tool. The jump dialog now also sets up the SRC track itself (rename to "SRC", colour red, move to top, pin via action 40000, store GUID) on first use — so the separate JG_SRC_Source_Position_HUD monitor is no longer needed and has been removed from this repository. One window for everything: set up SRC once, then every shortcut press is an instant keyboard-first jump (auto-focus, Enter jumps + closes, Esc cancels); compact mmss/hhmmss, h:mm:ss.xxx, plain seconds and relative +/- all accepted. A "Reset SRC" button removes the marking. Pressing the shortcut again while the window is open just refocuses it instead of stacking a second window. js_ReaScriptAPI strongly recommended for keyboard focus on macOS.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
     </reapack>
