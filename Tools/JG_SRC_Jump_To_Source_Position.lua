@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (keyboard-first jump dialog, edit-proof)
 -- @author JG
--- @version 1.0.0
+-- @version 1.0.1
 -- @about
 --   A small "Jump to" dialog (à la REAPER's native action 40069) that jumps the
 --   edit cursor to a SOURCE-file position on the SRC track. Unlike 40069 — which
@@ -13,6 +13,7 @@
 --   not-found time the window stays open with a message so you can correct it.
 --
 --   Accepted input (the source-meaningful subset of 40069):
+--     mmss / hhmmss   compact digit run, e.g. 1126 = 11:26, 021126 = 2:11:26
 --     mm:ss.xxx       minutes:seconds.fraction
 --     h:mm:ss.xxx     hours:minutes:seconds.fraction
 --     123.4           plain seconds
@@ -155,17 +156,31 @@ local function resolveTargetFile(cursor)
   return nil
 end
 
--- "+5", "-1:02", "2:11:26.310", "90.5" → source position (seconds)
+-- A bare digit run of 4+ chars is compact mmss / hmmss / hhmmss (last two = sec,
+-- next two = min, the rest = hours); anything else (": " / "." / short numbers)
+-- goes to REAPER's hh:mm:ss.xxx / plain-seconds parser.
+local function parseClock(str)
+  str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if str:find("^%d+$") and #str >= 4 then
+    local n  = #str
+    local ss = tonumber(str:sub(-2))
+    local mm = tonumber(str:sub(-4, -3))
+    local hh = (n > 4) and tonumber(str:sub(1, n - 4)) or 0
+    return hh * 3600 + mm * 60 + ss
+  end
+  return r.parse_timestr(str)
+end
+
+-- "+5", "-1:02", compact "1126"/"021126", "2:11:26.310", "90.5" → source seconds
 local function parseTarget(str, baseSrcPos)
   str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if str == "" then return nil, "leer" end
   local sign = str:sub(1, 1)
   if sign == "+" or sign == "-" then
     if not baseSrcPos then return nil, "relativ braucht Cursor über einem SRC-Item" end
-    local delta = r.parse_timestr(str:sub(2))
-    return baseSrcPos + (sign == "+" and delta or -delta)
+    return baseSrcPos + (sign == "+" and 1 or -1) * parseClock(str:sub(2))
   end
-  return r.parse_timestr(str)
+  return parseClock(str)
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -221,10 +236,11 @@ local function draw()
   if needFocus and r.ImGui_IsItemActive(ctx) then needFocus = false end
 
   r.ImGui_Spacing(ctx)
-  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx     Minuten:Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "h:mm:ss.xxx   Stunden:Minuten:Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "123.4         reine Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "+val / -val   relativ zur Quellposition")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mmss / hhmmss   kompakt, z.B. 1126 = 11:26")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx       Minuten:Sekunden")
+  r.ImGui_TextColored(ctx, 0x909090FF, "h:mm:ss.xxx     Stunden:Minuten:Sekunden")
+  r.ImGui_TextColored(ctx, 0x909090FF, "123.4           reine Sekunden")
+  r.ImGui_TextColored(ctx, 0x909090FF, "+val / -val     relativ zur Quellposition")
 
   if status then
     r.ImGui_Spacing(ctx)

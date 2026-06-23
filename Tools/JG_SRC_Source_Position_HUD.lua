@@ -1,6 +1,6 @@
 -- @description SRC Source Position HUD (live source-file position under cursor, edit-proof jump-to)
 -- @author JG
--- @version 1.0.2
+-- @version 1.0.3
 -- @about
 --   A floating HUD that shows, live, the SOURCE-FILE position under the edit
 --   (or play) cursor and lets you JUMP to a source position by typing it. The
@@ -244,6 +244,20 @@ local function basename(p)
   return (p or ""):match("[^/\\]+$") or (p or "")
 end
 
+-- A bare digit run of 4+ chars is compact mmss / hmmss / hhmmss; anything else
+-- (": " / "." / short numbers) goes to REAPER's hh:mm:ss.xxx / plain-seconds parser.
+local function parseClock(str)
+  str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if str:find("^%d+$") and #str >= 4 then
+    local n  = #str
+    local ss = tonumber(str:sub(-2))
+    local mm = tonumber(str:sub(-4, -3))
+    local hh = (n > 4) and tonumber(str:sub(1, n - 4)) or 0
+    return hh * 3600 + mm * 60 + ss
+  end
+  return r.parse_timestr(str)
+end
+
 -- ════════════════════════════════════════════════════════════════════════
 --  GUI
 -- ════════════════════════════════════════════════════════════════════════
@@ -260,7 +274,7 @@ if stickyFile == "" then stickyFile = nil end
 
 local function doJump()
   if not stickyFile then status = "Noch keine SRC-Quelle erkannt."; return end
-  local s = r.parse_timestr(jumpStr)             -- "5:00", "1:02:03", "90" …
+  local s = parseClock(jumpStr)                  -- "5:00", "1:02:03", "1126", "90" …
   local t = timelineForSource(srcTrack, stickyFile, s, refPos())
   if t then
     r.SetEditCurPos(t, true, false)              -- move cursor + follow view
