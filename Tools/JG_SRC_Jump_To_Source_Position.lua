@@ -37,7 +37,7 @@
 
 local r = reaper
 
-local VERSION   = "1.1.0"
+local VERSION   = "1.1.1"
 local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
 
 if not r.ImGui_CreateContext then
