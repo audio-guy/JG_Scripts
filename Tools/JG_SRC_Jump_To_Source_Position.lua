@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (keyboard-first jump dialog, edit-proof)
 -- @author JG
--- @version 1.0.1
+-- @version 1.0.2
 -- @about
 --   A small "Jump to" dialog (à la REAPER's native action 40069) that jumps the
 --   edit cursor to a SOURCE-file position on the SRC track. Unlike 40069 — which
@@ -194,6 +194,7 @@ local inputStr  = ""
 local status    = nil
 local needFocus = true
 local done      = false
+local frames    = 0
 
 local function doJump()
   local cursor = refPos()
@@ -262,10 +263,12 @@ local function loop()
   local vp = r.ImGui_GetMainViewport(ctx)
   local cx, cy = r.ImGui_Viewport_GetCenter(vp)
   r.ImGui_SetNextWindowPos(ctx, cx, cy, r.ImGui_Cond_Appearing(), 0.5, 0.5)
-  r.ImGui_SetNextWindowFocus(ctx)
+  -- Grab OS keyboard focus until the input is actually active (TopMost is avoided
+  -- on purpose: on macOS it makes the window a non-activating panel that never
+  -- receives keystrokes, so neither typing nor Enter would reach it).
+  if needFocus then r.ImGui_SetNextWindowFocus(ctx) end
   local flags = r.ImGui_WindowFlags_AlwaysAutoResize() |
-                r.ImGui_WindowFlags_NoCollapse() |
-                r.ImGui_WindowFlags_TopMost()
+                r.ImGui_WindowFlags_NoCollapse()
   local visible, open = r.ImGui_Begin(ctx, "Springe zu Quellposition", true, flags)
   if visible then
     draw()
@@ -273,6 +276,8 @@ local function loop()
   end
   r.ImGui_PopFont(ctx)
 
+  frames = frames + 1
+  if frames > 60 then needFocus = false end   -- give up forcing focus after ~1 s
   if open and not done then r.defer(loop) end
 end
 

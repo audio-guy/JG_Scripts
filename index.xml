@@ -258,6 +258,10 @@
         <changelog><![CDATA[Add compact digit-only time input — mmss / hmmss / hhmmss (e.g. 1126 = 11:26, 021126 = 2:11:26) — alongside the existing h:mm:ss.xxx, plain seconds and relative +/- forms. A bare run of 4+ digits is read as compact time (last two = seconds, next two = minutes, the rest = hours); shorter numbers and any input with ":" or "." go to REAPER's normal time parser.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
+      <version name="1.0.2" author="Julius Gass">
+        <changelog><![CDATA[Fix: on macOS the window did not receive keyboard focus, so you could neither type immediately nor close it with Enter. Removed the TopMost window flag (which made the window a non-activating panel that swallowed no keystrokes) and now grab window + keyboard focus only until the input field is active (max ~1 s) instead of every frame. Input is auto-focused on open and Enter jumps + closes as intended; if focus is ever missed, clicking the field once still works.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>
