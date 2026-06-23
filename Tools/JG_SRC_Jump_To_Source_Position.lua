@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (edit-proof source jump + SRC setup, one window)
 -- @author JG
--- @version 1.1.1
+-- @version 1.2.0
 -- @provides [main] .
 -- @about
 --   A small, keyboard-first "Jump to" dialog that jumps the edit cursor to a
@@ -14,8 +14,12 @@
 --       (renamed "SRC", coloured red, moved to the top and pinned via the native
 --       action 40000 on REAPER 7.46+). Its GUID is stored in the project, so it
 --       is recognised again across restarts; later runs go straight to the jump.
---     * The input field is auto-focused so you can type immediately, Enter jumps
---       and closes, Esc cancels. A not-found time keeps the window open.
+--     * The input field is auto-focused so you can type immediately. Enter jumps
+--       to the occurrence nearest the cursor; if the same source time exists more
+--       than once on SRC (e.g. duplicated material from editing), pressing Enter
+--       again cycles to the next-later occurrence and wraps to the first after the
+--       last, keeping the window open. With a single occurrence Enter jumps and
+--       closes. Esc closes; a not-found time keeps the window open.
 --
 --   Accepted input (the source-meaningful subset of 40069):
 --     mmss            last two = seconds, rest = minutes (11637 = 116:37)
@@ -37,7 +41,7 @@
 
 local r = reaper
 
-local VERSION   = "1.1.1"
+local VERSION   = "1.2.0"
 local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
 
 if not r.ImGui_CreateContext then
@@ -212,8 +216,10 @@ local function srcUnderCursor(track, cursor)
   return nil, nil
 end
 
-local function timelineForSource(track, file, s, cursor)
-  local bestT, bestDist = nil, math.huge
+-- Every timeline position where source position `s` of `file` lands on SRC
+-- (one per item whose source range contains `s`), sorted ascending in time.
+local function timelinePositions(track, file, s)
+  local list = {}
   for i = 0, r.CountTrackMediaItems(track) - 1 do
     local item = r.GetTrackMediaItem(track, i)
     local take = r.GetActiveTake(item)
@@ -223,13 +229,21 @@ local function timelineForSource(track, file, s, cursor)
       local offs = r.GetMediaItemTakeInfo_Value(take, "D_STARTOFFS")
       local rate = r.GetMediaItemTakeInfo_Value(take, "D_PLAYRATE")
       if s >= offs and s < offs + len * rate then
-        local t = pos + (s - offs) / rate
-        local d = math.abs(t - cursor)
-        if d < bestDist then bestT, bestDist = t, d end
+        list[#list + 1] = pos + (s - offs) / rate
       end
     end
   end
-  return bestT
+  table.sort(list)
+  return list
+end
+
+local function nearestIndex(list, cursor)
+  local bi, bd = 1, math.huge
+  for i = 1, #list do
+    local d = math.abs(list[i] - cursor)
+    if d < bd then bi, bd = i, d end
+  end
+  return bi
 end
 
 local function distinctSourceFiles(track)
@@ -294,6 +308,9 @@ local status    = nil
 local needFocus = true
 local done      = false
 local frames    = 0
+local cycleKey  = nil   -- identifies the current target (file@source-time)
+local cycleList = nil   -- the matches captured when the cycle started
+local cycleIdx  = 0     -- 1-based position in the cycle
 
 local function doJump()
   local cursor = refPos()
@@ -305,13 +322,29 @@ local function doJump()
   local _, baseSrc = srcUnderCursor(srcTrack, cursor)
   local s, err = parseTarget(inputStr, baseSrc)
   if not s then status = "Invalid input (" .. (err or "?") .. ")."; return end
-  local t = timelineForSource(srcTrack, file, s, cursor)
-  if t then
-    r.SetEditCurPos(t, true, false)
-    r.SetProjExtState(0, SECTION, KEY_LAST, file)
-    done = true
-  else
+
+  local list = timelinePositions(srcTrack, file, s)
+  if #list == 0 then
     status = ("%s not found in %s"):format(fmt(s), basename(file))
+    return
+  end
+
+  local key = string.format("%s@%.3f", file, s)
+  if key == cycleKey and cycleList and #cycleList == #list then
+    cycleIdx = (cycleIdx % #list) + 1          -- same target again → next later (wraps)
+  else
+    cycleKey, cycleList = key, list            -- new target → start nearest the cursor
+    cycleIdx = nearestIndex(list, cursor)
+  end
+
+  r.SetEditCurPos(list[cycleIdx], true, false)
+  r.SetProjExtState(0, SECTION, KEY_LAST, file)
+
+  if #list == 1 then
+    done = true                                 -- single occurrence → jump and close
+  else
+    status = ("%s in %s — %d/%d   (Enter: next, Esc: close)")
+             :format(fmt(s), basename(file), cycleIdx, #list)
   end
 end
 

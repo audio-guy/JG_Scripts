@@ -255,6 +255,10 @@
         <changelog><![CDATA[Compact time rule changed so it follows minutes-based thinking: the last two digits are always seconds and everything before is minutes (unbounded), so 11637 = 116:37 (1:56:37). Hours now require the full six-digit form: exactly six digits are read as HHMMSS (011637 = 1:16:37). Previously 5 digits were silently split into hours (11637 → 1:16:37), which was confusing. 4-digit mmss (1126 = 11:26) and 6-digit hhmmss (021126 = 2:11:26) are unchanged; colon forms, plain seconds and relative +/- unaffected.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
+      <version name="1.2.0" author="Julius Gass">
+        <changelog><![CDATA[Cycle through duplicate occurrences: when the same source time exists more than once on the SRC track (e.g. the same source material was cut/duplicated onto the track), Enter no longer closes the window — it jumps first to the occurrence nearest the edit cursor, then on each further Enter (same input) to the next-later occurrence in the timeline, wrapping back to the first after the last. The status line shows the position (e.g. "2/3"). With a single occurrence Enter still jumps and closes; Esc closes; a not-found time keeps the window open.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>
