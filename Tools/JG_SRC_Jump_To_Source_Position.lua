@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (edit-proof source jump + SRC setup, one window)
 -- @author JG
--- @version 1.2.0
+-- @version 1.2.1
 -- @provides [main] .
 -- @about
 --   A small, keyboard-first "Jump to" dialog that jumps the edit cursor to a
@@ -41,7 +41,7 @@
 
 local r = reaper
 
-local VERSION   = "1.2.0"
+local VERSION   = "1.2.1"
 local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
 
 if not r.ImGui_CreateContext then
@@ -308,6 +308,7 @@ local status    = nil
 local needFocus = true
 local done      = false
 local frames    = 0
+local refocus   = false -- re-focus the input next frame (Enter deactivates it)
 local cycleKey  = nil   -- identifies the current target (file@source-time)
 local cycleList = nil   -- the matches captured when the cycle started
 local cycleIdx  = 0     -- 1-based position in the cycle
@@ -384,7 +385,7 @@ local function draw()
   r.ImGui_Text(ctx, "Jump to:")
   r.ImGui_SameLine(ctx)
   r.ImGui_SetNextItemWidth(ctx, 180)
-  if needFocus then r.ImGui_SetKeyboardFocusHere(ctx) end
+  if needFocus or refocus then r.ImGui_SetKeyboardFocusHere(ctx); refocus = false end
   local enter
   enter, inputStr = r.ImGui_InputText(ctx, "##jump", inputStr,
                                       r.ImGui_InputTextFlags_EnterReturnsTrue())
@@ -410,7 +411,7 @@ local function draw()
   r.ImGui_SameLine(ctx)
   if r.ImGui_SmallButton(ctx, "Reset SRC") then resetSRC() end
 
-  if enter then doJump() end
+  if enter then doJump(); refocus = not done end   -- keep the field focused for the next Enter
   if r.ImGui_IsKeyPressed(ctx, r.ImGui_Key_Escape()) then done = true end
 end
 

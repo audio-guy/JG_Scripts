@@ -259,6 +259,10 @@
         <changelog><![CDATA[Cycle through duplicate occurrences: when the same source time exists more than once on the SRC track (e.g. the same source material was cut/duplicated onto the track), Enter no longer closes the window — it jumps first to the occurrence nearest the edit cursor, then on each further Enter (same input) to the next-later occurrence in the timeline, wrapping back to the first after the last. The status line shows the position (e.g. "2/3"). With a single occurrence Enter still jumps and closes; Esc closes; a not-found time keeps the window open.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
+      <version name="1.2.1" author="Julius Gass">
+        <changelog><![CDATA[Fix: the input field lost keyboard focus after Enter (ImGui's EnterReturnsTrue deactivates the field), so cycling through duplicate occurrences required clicking the field again between presses. The field is now re-focused automatically after each Enter that keeps the window open, so repeated Enter cycles without re-clicking.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>
