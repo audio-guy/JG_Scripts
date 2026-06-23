@@ -247,6 +247,10 @@
         <changelog><![CDATA[Jump field now also understands compact digit-only times — mmss / hmmss / hhmmss (e.g. 1126 = 11:26, 021126 = 2:11:26) — in addition to h:mm:ss.xxx and plain seconds. A bare run of 4+ digits is read as compact time (last two = seconds, next two = minutes, the rest = hours); shorter numbers and any input with ":" or "." use REAPER's normal time parser. Matches the input of JG_SRC_Jump_To_Source_Position.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
       </version>
+      <version name="1.0.4" author="Julius Gass">
+        <changelog><![CDATA[UI language switched to English and the version is now shown in the window title bar. No functional change.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_SRC_Jump_To_Source_Position.lua" type="script" desc="JG SRC Jump To Source Position">
@@ -260,6 +264,10 @@
       </version>
       <version name="1.0.2" author="Julius Gass">
         <changelog><![CDATA[Fix: on macOS the window did not receive keyboard focus, so you could neither type immediately nor close it with Enter. Removed the TopMost window flag (which made the window a non-activating panel that swallowed no keystrokes) and now grab window + keyboard focus only until the input field is active (max ~1 s) instead of every frame. Input is auto-focused on open and Enter jumps + closes as intended; if focus is ever missed, clicking the field once still works.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
+      <version name="1.0.3" author="Julius Gass">
+        <changelog><![CDATA[Fix keyboard focus on macOS for real: the window is now made the active OS window via js_ReaScriptAPI (JS_Window_SetFocus, found by title) until the input field is active, so you can type immediately and Enter jumps + closes. ImGui's own focus call alone did not grab OS focus when launched from an action. js_ReaScriptAPI is optional but strongly recommended for this. UI language switched to English and the version is shown in the window title bar.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
     </reapack>

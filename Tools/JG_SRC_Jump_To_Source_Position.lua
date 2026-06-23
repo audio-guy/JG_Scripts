@@ -1,16 +1,17 @@
 -- @description SRC Jump To Source Position (keyboard-first jump dialog, edit-proof)
 -- @author JG
--- @version 1.0.2
+-- @version 1.0.3
+-- @provides [main] .
 -- @about
---   A small "Jump to" dialog (à la REAPER's native action 40069) that jumps the
+--   A small "Jump to" dialog (like REAPER's native action 40069) that jumps the
 --   edit cursor to a SOURCE-file position on the SRC track. Unlike 40069 — which
 --   is timeline-absolute — the target is computed from the SRC item's CURRENT
 --   position + start offset, so the same source time keeps landing on the same
 --   content after ripple cuts and moves.
 --
---   Meant to be bound to a shortcut: the input field is auto-focused, so you can
---   type immediately; Enter jumps and closes the window, Esc cancels. On a
---   not-found time the window stays open with a message so you can correct it.
+--   Made to be bound to a shortcut: the input field is auto-focused so you can
+--   type immediately, Enter jumps and closes the window, Esc cancels. A not-found
+--   time keeps the window open with a message so you can correct it.
 --
 --   Accepted input (the source-meaningful subset of 40069):
 --     mmss / hhmmss   compact digit run, e.g. 1126 = 11:26, 021126 = 2:11:26
@@ -18,27 +19,32 @@
 --     h:mm:ss.xxx     hours:minutes:seconds.fraction
 --     123.4           plain seconds
 --     +val / -val     relative to the current source position under the cursor
---   Marker/region/measure/track-item syntaxes of 40069 are timeline concepts and
---   do not map to a source position, so they are intentionally not supported.
 --
 --   Target file = the SRC source under the edit/play cursor; if the cursor sits
 --   in a gap, the last file seen (shared with the HUD via project ExtState) or —
 --   if the SRC track holds a single source — that one. Requires an SRC track set
---   up by JG_SRC_Source_Position_HUD, and ReaImGui.
+--   up by JG_SRC_Source_Position_HUD, and ReaImGui. js_ReaScriptAPI is optional
+--   but strongly recommended: on macOS it lets the window grab keyboard focus so
+--   you can type immediately.
 
 local r = reaper
 
+local VERSION   = "1.0.3"
+local WIN_TITLE = "JG SRC Jump to Source Position  (v" .. VERSION .. ")"
+
 if not r.ImGui_CreateContext then
-  r.MB("Dieses Script benötigt ReaImGui.\n\n" ..
-       "Installiere es über ReaPack:\n" ..
+  r.MB("This script requires ReaImGui.\n\n" ..
+       "Install it via ReaPack:\n" ..
        "Extensions > ReaPack > Browse packages > \"ReaImGui\".",
-       "Fehlende Abhängigkeit", 0)
+       "Missing dependency", 0)
   return
 end
 
-local SECTION   = "SRC_HUD"
-local KEY_GUID  = "track_guid"
-local KEY_LAST  = "last_file"
+local HAS_JS = (r.JS_Window_Find ~= nil) and (r.JS_Window_SetFocus ~= nil)
+
+local SECTION  = "SRC_HUD"
+local KEY_GUID = "track_guid"
+local KEY_LAST = "last_file"
 
 -- ════════════════════════════════════════════════════════════════════════
 --  Shared helpers (same maths as the HUD)
@@ -138,26 +144,26 @@ end
 local _, guid = r.GetProjExtState(0, SECTION, KEY_GUID)
 local srcTrack = findTrackByGUID(guid)
 if not srcTrack then
-  r.MB("Keine SRC-Spur eingerichtet.\n\n" ..
-       "Starte zuerst das HUD (JG_SRC_Source_Position_HUD) und richte eine SRC-Spur ein.",
+  r.MB("No SRC track set up.\n\n" ..
+       "Start JG_SRC_Source_Position_HUD first and set up an SRC track.",
        "SRC Jump", 0)
   return
 end
 
 local function resolveTargetFile(cursor)
-  local f = srcUnderCursor(srcTrack, cursor)          -- 1) under the cursor
+  local f = srcUnderCursor(srcTrack, cursor)             -- 1) under the cursor
   if f then return f end
-  local _, lf = r.GetProjExtState(0, SECTION, KEY_LAST) -- 2) last seen (shared w/ HUD)
+  local _, lf = r.GetProjExtState(0, SECTION, KEY_LAST)  -- 2) last seen (shared w/ HUD)
   if lf ~= "" then
     for _, x in ipairs(distinctSourceFiles(srcTrack)) do if x == lf then return lf end end
   end
-  local list = distinctSourceFiles(srcTrack)            -- 3) the only source on SRC
+  local list = distinctSourceFiles(srcTrack)             -- 3) the only source on SRC
   if #list == 1 then return list[1] end
   return nil
 end
 
 -- A bare digit run of 4+ chars is compact mmss / hmmss / hhmmss (last two = sec,
--- next two = min, the rest = hours); anything else (": " / "." / short numbers)
+-- next two = min, the rest = hours); anything else (":" / "." / short numbers)
 -- goes to REAPER's hh:mm:ss.xxx / plain-seconds parser.
 local function parseClock(str)
   str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -174,10 +180,10 @@ end
 -- "+5", "-1:02", compact "1126"/"021126", "2:11:26.310", "90.5" → source seconds
 local function parseTarget(str, baseSrcPos)
   str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
-  if str == "" then return nil, "leer" end
+  if str == "" then return nil, "empty" end
   local sign = str:sub(1, 1)
   if sign == "+" or sign == "-" then
-    if not baseSrcPos then return nil, "relativ braucht Cursor über einem SRC-Item" end
+    if not baseSrcPos then return nil, "relative needs the cursor over an SRC item" end
     return baseSrcPos + (sign == "+" and 1 or -1) * parseClock(str:sub(2))
   end
   return parseClock(str)
@@ -200,34 +206,33 @@ local function doJump()
   local cursor = refPos()
   local file   = resolveTargetFile(cursor)
   if not file then
-    status = "Keine Zieldatei: Cursor über kein SRC-Item und kein eindeutiges Quellfile."
+    status = "No target source: cursor over no SRC item and no single source file."
     return
   end
   local _, baseSrc = srcUnderCursor(srcTrack, cursor)
   local s, err = parseTarget(inputStr, baseSrc)
-  if not s then status = "Ungültige Eingabe (" .. (err or "?") .. ")."; return end
+  if not s then status = "Invalid input (" .. (err or "?") .. ")."; return end
   local t = timelineForSource(srcTrack, file, s, cursor)
   if t then
     r.SetEditCurPos(t, true, false)
     r.SetProjExtState(0, SECTION, KEY_LAST, file)     -- remember for next time
     done = true                                        -- success → close
   else
-    status = ("%s nicht in %s"):format(fmt(s), basename(file))
+    status = ("%s not found in %s"):format(fmt(s), basename(file))
   end
 end
 
 local function draw()
-  -- live target-file hint, so the user knows where the jump will land
   local file = resolveTargetFile(refPos())
   if file then
-    r.ImGui_TextColored(ctx, 0x80C0FFFF, "Ziel-Quelle: " .. basename(file))
+    r.ImGui_TextColored(ctx, 0x80C0FFFF, "Target source: " .. basename(file))
   else
-    r.ImGui_TextColored(ctx, 0xFF8080FF, "Ziel-Quelle: — (keine erkannt)")
+    r.ImGui_TextColored(ctx, 0xFF8080FF, "Target source: — (none detected)")
   end
   r.ImGui_Spacing(ctx)
 
   r.ImGui_AlignTextToFramePadding(ctx)
-  r.ImGui_Text(ctx, "Springe zu:")
+  r.ImGui_Text(ctx, "Jump to:")
   r.ImGui_SameLine(ctx)
   r.ImGui_SetNextItemWidth(ctx, 180)
   if needFocus then r.ImGui_SetKeyboardFocusHere(ctx) end
@@ -237,11 +242,11 @@ local function draw()
   if needFocus and r.ImGui_IsItemActive(ctx) then needFocus = false end
 
   r.ImGui_Spacing(ctx)
-  r.ImGui_TextColored(ctx, 0x909090FF, "mmss / hhmmss   kompakt, z.B. 1126 = 11:26")
-  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx       Minuten:Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "h:mm:ss.xxx     Stunden:Minuten:Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "123.4           reine Sekunden")
-  r.ImGui_TextColored(ctx, 0x909090FF, "+val / -val     relativ zur Quellposition")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mmss / hhmmss   compact, e.g. 1126 = 11:26")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx       minutes:seconds")
+  r.ImGui_TextColored(ctx, 0x909090FF, "h:mm:ss.xxx     hours:minutes:seconds")
+  r.ImGui_TextColored(ctx, 0x909090FF, "123.4           plain seconds")
+  r.ImGui_TextColored(ctx, 0x909090FF, "+val / -val     relative to source position")
 
   if status then
     r.ImGui_Spacing(ctx)
@@ -263,18 +268,23 @@ local function loop()
   local vp = r.ImGui_GetMainViewport(ctx)
   local cx, cy = r.ImGui_Viewport_GetCenter(vp)
   r.ImGui_SetNextWindowPos(ctx, cx, cy, r.ImGui_Cond_Appearing(), 0.5, 0.5)
-  -- Grab OS keyboard focus until the input is actually active (TopMost is avoided
-  -- on purpose: on macOS it makes the window a non-activating panel that never
-  -- receives keystrokes, so neither typing nor Enter would reach it).
   if needFocus then r.ImGui_SetNextWindowFocus(ctx) end
   local flags = r.ImGui_WindowFlags_AlwaysAutoResize() |
                 r.ImGui_WindowFlags_NoCollapse()
-  local visible, open = r.ImGui_Begin(ctx, "Springe zu Quellposition", true, flags)
+  local visible, open = r.ImGui_Begin(ctx, WIN_TITLE, true, flags)
   if visible then
     draw()
     r.ImGui_End(ctx)
   end
   r.ImGui_PopFont(ctx)
+
+  -- Force OS keyboard focus onto the window until the input is active. ImGui's
+  -- own SetNextWindowFocus is not enough on macOS when launched from an action;
+  -- js_ReaScriptAPI grabs the native window by title and makes it key.
+  if needFocus and HAS_JS then
+    local hwnd = r.JS_Window_Find(WIN_TITLE, true)
+    if hwnd then r.JS_Window_SetFocus(hwnd) end
+  end
 
   frames = frames + 1
   if frames > 60 then needFocus = false end   -- give up forcing focus after ~1 s

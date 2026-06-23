@@ -1,6 +1,6 @@
 -- @description SRC Source Position HUD (live source-file position under cursor, edit-proof jump-to)
 -- @author JG
--- @version 1.0.3
+-- @version 1.0.4
 -- @about
 --   A floating HUD that shows, live, the SOURCE-FILE position under the edit
 --   (or play) cursor and lets you JUMP to a source position by typing it. The
@@ -32,16 +32,19 @@ local r = reaper
 --  Dependency check
 -- ════════════════════════════════════════════════════════════════════════
 if not r.ImGui_CreateContext then
-  r.MB("Dieses Script benötigt ReaImGui.\n\n" ..
-       "Installiere es über ReaPack:\n" ..
+  r.MB("This script requires ReaImGui.\n\n" ..
+       "Install it via ReaPack:\n" ..
        "Extensions > ReaPack > Browse packages > \"ReaImGui\".",
-       "Fehlende Abhängigkeit", 0)
+       "Missing dependency", 0)
   return
 end
 
 -- ════════════════════════════════════════════════════════════════════════
 --  Constants
 -- ════════════════════════════════════════════════════════════════════════
+local VERSION   = "1.0.4"
+local WIN_TITLE = "JG SRC Position HUD  (v" .. VERSION .. ")"
+
 local SECTION  = "SRC_HUD"      -- ExtState / ProjExtState section
 local KEY_GUID = "track_guid"   -- project key holding the SRC track GUID
 local RUN_FLAG = "running"      -- global key: HUD instance is deferring
@@ -142,19 +145,19 @@ local function setupSRC()
 
   -- 2) else use the single selected track
   if r.CountSelectedTracks(0) ~= 1 then
-    r.MB("Bitte genau eine Source-Spur selektieren und das Script erneut starten.",
+    r.MB("Please select exactly one source track and run the script again.",
          "SRC HUD", 0)
     return nil
   end
   tr = r.GetSelectedTrack(0, 0)
   local _, nm = r.GetTrackName(tr)
-  if r.MB(("Selektierte Spur „%s“ als SRC einrichten?"):format(nm), "SRC HUD", 4) ~= 6 then
+  if r.MB(("Set up the selected track \"%s\" as SRC?"):format(nm), "SRC HUD", 4) ~= 6 then
     return nil   -- 6 = Yes; anything else = abort
   end
   r.Undo_BeginBlock()
   applySRCStyle(tr)
   r.SetProjExtState(0, SECTION, KEY_GUID, r.GetTrackGUID(tr))
-  r.Undo_EndBlock("SRC HUD: Spur als SRC einrichten", -1)
+  r.Undo_EndBlock("SRC HUD: set up track as SRC", -1)
   return tr
 end
 
@@ -266,21 +269,21 @@ local font = r.ImGui_CreateFont("sans-serif", 14)
 r.ImGui_Attach(ctx, font)
 
 local jumpStr    = ""
-local status     = "Bewege den Cursor über die SRC-Spur."
+local status     = "Move the cursor over the SRC track."
 -- last source file seen under the cursor; shared with JG_SRC_Jump_To_Source_Position
 -- via project ExtState "last_file" and seeded from it on start.
 local stickyFile = select(2, r.GetProjExtState(0, SECTION, "last_file"))
 if stickyFile == "" then stickyFile = nil end
 
 local function doJump()
-  if not stickyFile then status = "Noch keine SRC-Quelle erkannt."; return end
+  if not stickyFile then status = "No SRC source detected yet."; return end
   local s = parseClock(jumpStr)                  -- "5:00", "1:02:03", "1126", "90" …
   local t = timelineForSource(srcTrack, stickyFile, s, refPos())
   if t then
     r.SetEditCurPos(t, true, false)              -- move cursor + follow view
     status = ("→ %s @ %s"):format(basename(stickyFile), fmt(s))
   else
-    status = ("%s nicht in %s"):format(fmt(s), basename(stickyFile))
+    status = ("%s not found in %s"):format(fmt(s), basename(stickyFile))
   end
 end
 
@@ -290,11 +293,11 @@ local function resetSRC()
     pcall(function() r.SetMediaTrackInfo_Value(srcTrack, "B_TCPPIN", 0) end)
     r.SetMediaTrackInfo_Value(srcTrack, "I_CUSTOMCOLOR", 0)
     r.GetSetMediaTrackInfo_String(srcTrack, "P_NAME", "", true)
-    r.Undo_EndBlock("SRC HUD: SRC-Markierung entfernen", -1)
+    r.Undo_EndBlock("SRC HUD: remove SRC marking", -1)
     r.TrackList_AdjustWindows(false)
   end
   r.SetProjExtState(0, SECTION, KEY_GUID, "")
-  status = "SRC-Markierung entfernt (Name/Farbe/Pin)."
+  status = "SRC marking removed (name/colour/pin)."
 end
 
 local function draw()
@@ -302,7 +305,7 @@ local function draw()
   if not r.ValidatePtr2(0, srcTrack, "MediaTrack*") then
     srcTrack = findTrackByGUID(srcGUID)
     if not srcTrack then
-      r.ImGui_TextColored(ctx, 0xFF6060FF, "SRC-Spur nicht mehr vorhanden.")
+      r.ImGui_TextColored(ctx, 0xFF6060FF, "SRC track no longer exists.")
       return
     end
   end
@@ -315,40 +318,40 @@ local function draw()
   end
 
   if file then
-    r.ImGui_Text(ctx, "Quelldatei:  " .. basename(file))
-    r.ImGui_Text(ctx, "Quellpos.:   " .. fmt(s))
+    r.ImGui_Text(ctx, "Source file:  " .. basename(file))
+    r.ImGui_Text(ctx, "Source pos.:  " .. fmt(s))
   else
-    r.ImGui_TextColored(ctx, 0x909090FF, "Quelldatei:  — (keine SRC-Quelle unter Cursor)")
+    r.ImGui_TextColored(ctx, 0x909090FF, "Source file:  — (no SRC source under cursor)")
     if stickyFile then
-      r.ImGui_TextColored(ctx, 0x909090FF, "zuletzt:     " .. basename(stickyFile))
+      r.ImGui_TextColored(ctx, 0x909090FF, "last seen:    " .. basename(stickyFile))
     else
       r.ImGui_Text(ctx, "")
     end
   end
-  r.ImGui_Text(ctx, "Timeline:    " .. fmt(cursor))
+  r.ImGui_Text(ctx, "Timeline:     " .. fmt(cursor))
 
   r.ImGui_Separator(ctx)
 
-  r.ImGui_Text(ctx, "Springe zu (Quellzeit):")
+  r.ImGui_Text(ctx, "Jump to (source time):")
   r.ImGui_SetNextItemWidth(ctx, 150)
   local enter
   enter, jumpStr = r.ImGui_InputText(ctx, "##jump", jumpStr,
                                      r.ImGui_InputTextFlags_EnterReturnsTrue())
   r.ImGui_SameLine(ctx)
-  local clicked = r.ImGui_Button(ctx, "Springe", 80, 0)
+  local clicked = r.ImGui_Button(ctx, "Jump", 80, 0)
   if enter or clicked then doJump() end
 
   r.ImGui_Spacing(ctx)
   r.ImGui_TextWrapped(ctx, status)
 
   r.ImGui_Separator(ctx)
-  if r.ImGui_SmallButton(ctx, "SRC zurücksetzen") then resetSRC() end
+  if r.ImGui_SmallButton(ctx, "Reset SRC") then resetSRC() end
 end
 
 local function loop()
   r.ImGui_PushFont(ctx, font, 14)
   r.ImGui_SetNextWindowSize(ctx, 380, 240, r.ImGui_Cond_FirstUseEver())
-  local visible, open = r.ImGui_Begin(ctx, "JG SRC Position HUD", true)
+  local visible, open = r.ImGui_Begin(ctx, WIN_TITLE, true)
   if visible then
     draw()
     r.ImGui_End(ctx)
