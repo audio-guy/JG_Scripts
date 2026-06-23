@@ -251,6 +251,10 @@
         <changelog><![CDATA[Consolidated into a single self-contained tool. The jump dialog now also sets up the SRC track itself (rename to "SRC", colour red, move to top, pin via action 40000, store GUID) on first use — so the separate JG_SRC_Source_Position_HUD monitor is no longer needed and has been removed from this repository. One window for everything: set up SRC once, then every shortcut press is an instant keyboard-first jump (auto-focus, Enter jumps + closes, Esc cancels); compact mmss/hhmmss, h:mm:ss.xxx, plain seconds and relative +/- all accepted. A "Reset SRC" button removes the marking. Pressing the shortcut again while the window is open just refocuses it instead of stacking a second window. js_ReaScriptAPI strongly recommended for keyboard focus on macOS.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
       </version>
+      <version name="1.1.1" author="Julius Gass">
+        <changelog><![CDATA[Compact time rule changed so it follows minutes-based thinking: the last two digits are always seconds and everything before is minutes (unbounded), so 11637 = 116:37 (1:56:37). Hours now require the full six-digit form: exactly six digits are read as HHMMSS (011637 = 1:16:37). Previously 5 digits were silently split into hours (11637 → 1:16:37), which was confusing. 4-digit mmss (1126 = 11:26) and 6-digit hhmmss (021126 = 2:11:26) are unchanged; colon forms, plain seconds and relative +/- unaffected.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>

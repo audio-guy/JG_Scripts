@@ -1,6 +1,6 @@
 -- @description SRC Jump To Source Position (edit-proof source jump + SRC setup, one window)
 -- @author JG
--- @version 1.1.0
+-- @version 1.1.1
 -- @provides [main] .
 -- @about
 --   A small, keyboard-first "Jump to" dialog that jumps the edit cursor to a
@@ -18,7 +18,8 @@
 --       and closes, Esc cancels. A not-found time keeps the window open.
 --
 --   Accepted input (the source-meaningful subset of 40069):
---     mmss / hhmmss   compact digit run, e.g. 1126 = 11:26, 021126 = 2:11:26
+--     mmss            last two = seconds, rest = minutes (11637 = 116:37)
+--     hhmmss          exactly six digits = h:mm:ss (011637 = 1:16:37)
 --     mm:ss.xxx       minutes:seconds.fraction
 --     h:mm:ss.xxx     hours:minutes:seconds.fraction
 --     123.4           plain seconds
@@ -252,17 +253,20 @@ local function resolveTargetFile(cursor)
   return nil
 end
 
--- A bare digit run of 4+ chars is compact mmss / hmmss / hhmmss (last two = sec,
--- next two = min, the rest = hours); anything else (":" / "." / short numbers)
--- goes to REAPER's hh:mm:ss.xxx / plain-seconds parser.
+-- Compact digit input: the last two digits are always seconds, everything before
+-- is minutes (unbounded) — so 11637 = 116:37. EXCEPTION: exactly six digits are
+-- read as HHMMSS, so hours need the full form (011637 = 1:16:37). Anything with
+-- ":" / "." or fewer than four digits goes to REAPER's hh:mm:ss.xxx / seconds parser.
 local function parseClock(str)
   str = (str or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if str:find("^%d+$") and #str >= 4 then
-    local n  = #str
-    local ss = tonumber(str:sub(-2))
-    local mm = tonumber(str:sub(-4, -3))
-    local hh = (n > 4) and tonumber(str:sub(1, n - 4)) or 0
-    return hh * 3600 + mm * 60 + ss
+    if #str == 6 then            -- HHMMSS (hours need the full six digits)
+      return tonumber(str:sub(1, 2)) * 3600
+           + tonumber(str:sub(3, 4)) * 60
+           + tonumber(str:sub(5, 6))
+    end
+    -- MMSS: last two = seconds, everything before = minutes
+    return tonumber(str:sub(1, -3)) * 60 + tonumber(str:sub(-2))
   end
   return r.parse_timestr(str)
 end
@@ -354,9 +358,9 @@ local function draw()
   if needFocus and r.ImGui_IsItemActive(ctx) then needFocus = false end
 
   r.ImGui_Spacing(ctx)
-  r.ImGui_TextColored(ctx, 0x909090FF, "mmss / hhmmss   compact, e.g. 1126 = 11:26")
-  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx       minutes:seconds")
-  r.ImGui_TextColored(ctx, 0x909090FF, "h:mm:ss.xxx     hours:minutes:seconds")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mmss            last 2 = sec, rest = min (11637 = 116:37)")
+  r.ImGui_TextColored(ctx, 0x909090FF, "hhmmss          exactly 6 digits (011637 = 1:16:37)")
+  r.ImGui_TextColored(ctx, 0x909090FF, "mm:ss.xxx / h:mm:ss.xxx   colon form")
   r.ImGui_TextColored(ctx, 0x909090FF, "123.4           plain seconds")
   r.ImGui_TextColored(ctx, 0x909090FF, "+val / -val     relative to source position")
 
