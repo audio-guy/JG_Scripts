@@ -239,6 +239,17 @@
         <changelog><![CDATA[Pin the SRC track via the native action 40000 "Track: Pin tracks to top of arrange view" (REAPER 7.46+) instead of writing B_TCPPIN directly. The action leaves other pins — including the master track — untouched (unlike 40008, which unpins all others). The call is guarded by the B_TCPPIN state so re-running the script never toggles an already-pinned SRC back off, and it no-ops cleanly on pre-7.46 builds where 40000 is unassigned (the track is still moved to the top, just not pinned).]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
       </version>
+      <version name="1.0.2" author="Julius Gass">
+        <changelog><![CDATA[Share the last source file seen under the cursor with the new JG_SRC_Jump_To_Source_Position dialog via project ExtState ("last_file"), and seed the HUD's sticky file from it on start. This lets a shortcut-bound quick-jump target the file you were last hovering, even when the cursor sits in a gap. No change to the HUD's own behaviour otherwise.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Source_Position_HUD.lua</source>
+      </version>
+    </reapack>
+
+    <reapack name="JG_SRC_Jump_To_Source_Position.lua" type="script" desc="JG SRC Jump To Source Position">
+      <version name="1.0.0" author="Julius Gass">
+        <changelog><![CDATA[Initial release — keyboard-first "Springe zu" dialog (à la native action 40069) made for a shortcut: the input field is auto-focused so you can type immediately, Enter jumps and closes the window, Esc cancels, and a not-found time keeps the window open so you can correct it. Jumps the edit cursor to a SOURCE position on the SRC track, computed from each item's CURRENT position + start offset — edit-proof, survives ripple cuts, unlike the timeline-absolute 40069. Accepts mm:ss.xxx, h:mm:ss.xxx, plain seconds and relative +/- (relative to the current source position under the cursor); the marker/region/measure/track-item syntaxes of 40069 are timeline concepts and are intentionally not supported. Target file = the SRC source under the cursor, else the file last seen (shared with the HUD via project ExtState), else the single source on the SRC track. Requires an SRC track set up by JG_SRC_Source_Position_HUD and ReaImGui.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_SRC_Jump_To_Source_Position.lua</source>
+      </version>
     </reapack>
 
   </category>

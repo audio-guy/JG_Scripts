@@ -1,6 +1,6 @@
 -- @description SRC Source Position HUD (live source-file position under cursor, edit-proof jump-to)
 -- @author JG
--- @version 1.0.1
+-- @version 1.0.2
 -- @about
 --   A floating HUD that shows, live, the SOURCE-FILE position under the edit
 --   (or play) cursor and lets you JUMP to a source position by typing it. The
@@ -253,7 +253,10 @@ r.ImGui_Attach(ctx, font)
 
 local jumpStr    = ""
 local status     = "Bewege den Cursor über die SRC-Spur."
-local stickyFile = nil   -- last source file seen under the cursor
+-- last source file seen under the cursor; shared with JG_SRC_Jump_To_Source_Position
+-- via project ExtState "last_file" and seeded from it on start.
+local stickyFile = select(2, r.GetProjExtState(0, SECTION, "last_file"))
+if stickyFile == "" then stickyFile = nil end
 
 local function doJump()
   if not stickyFile then status = "Noch keine SRC-Quelle erkannt."; return end
@@ -292,7 +295,10 @@ local function draw()
 
   local cursor = refPos()
   local file, s = srcUnderCursor(srcTrack, cursor)
-  if file then stickyFile = file end
+  if file and file ~= stickyFile then
+    stickyFile = file
+    r.SetProjExtState(0, SECTION, "last_file", file)  -- share with the jump dialog
+  end
 
   if file then
     r.ImGui_Text(ctx, "Quelldatei:  " .. basename(file))
