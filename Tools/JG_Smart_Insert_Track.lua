@@ -1,9 +1,10 @@
 -- @description Smart Insert Track (insert track or folder for selection)
 -- @author JG
--- @version 1.1.1
+-- @version 1.2.0
 -- @changelog
---   Positional suffix pairs (Hi/Lo, High/Low, Upper/Lower) now pan by track
---   order: upper track in the TCP goes left, lower goes right.
+--   Pre-fill the folder name field with a suggestion: the common base name
+--   for stereo pairs ("Kamera 1 L/R" -> "Kamera 1"), or the instrument
+--   group in caps ("Kick"+"Snare"+... -> "DRUMS").
 -- @about
 --   Inserts a new track like action 40001. If multiple tracks are selected,
 --   offers to create a folder track containing the selected tracks instead.
@@ -35,6 +36,55 @@ local function split_suffix(name)
     suffix = suffix:gsub("^[%(%[]+", ""):gsub("[%)%]]+$", "")
     base = base:gsub("[%s%._%-/]+$", "")
     return base, suffix
+end
+
+-- Instrument groups for folder-name suggestions. If every selected track
+-- matches the same group, its name (in caps) is suggested.
+local GROUPS = {
+    { name = "DRUMS",   words = { kick=1, bd=1, bassdrum=1, snare=1, sn=1, tom=1, toms=1, floor=1,
+                                  floortom=1, hh=1, hihat=1, hihats=1, hat=1, hats=1, oh=1, ohs=1,
+                                  overhead=1, overheads=1, ride=1, crash=1, cymbal=1, cymbals=1,
+                                  room=1, drum=1, drums=1, schlagzeug=1 } },
+    { name = "PERC",    words = { perc=1, percussion=1, shaker=1, tambourine=1, tamb=1, conga=1,
+                                  congas=1, bongo=1, bongos=1, clap=1, claps=1, cowbell=1, cajon=1,
+                                  timbale=1, timbales=1 } },
+    { name = "KEYS",    words = { piano=1, klavier=1, keys=1, keyboard=1, rhodes=1, wurli=1,
+                                  wurlitzer=1, organ=1, orgel=1, hammond=1, synth=1, synths=1,
+                                  pad=1, pads=1, clav=1, ep=1 } },
+    { name = "GUITARS", words = { guitar=1, guitars=1, gtr=1, gtrs=1, git=1, gitarre=1, gitarren=1,
+                                  acoustic=1, akustik=1, western=1 } },
+    { name = "BASS",    words = { bass=1, synthbass=1, subbass=1 } },
+    { name = "VOCALS",  words = { vox=1, vocal=1, vocals=1, voc=1, gesang=1, bgv=1, bgvs=1,
+                                  choir=1, chor=1, harmony=1, harmonies=1 } },
+    { name = "STRINGS", words = { strings=1, streicher=1, violin=1, violins=1, vln=1, viola=1,
+                                  vla=1, cello=1, celli=1, vc=1 } },
+    { name = "HORNS",   words = { brass=1, blaeser=1, horn=1, horns=1, trumpet=1, tpt=1,
+                                  trombone=1, tbn=1, sax=1, saxophone=1, tuba=1 } },
+}
+
+local function track_matches_group(name, words)
+    for token in name:lower():gmatch("%a+") do
+        if words[token] then return true end
+    end
+    return false
+end
+
+-- Return the group name (caps) if ALL names match the same group, else nil.
+local function detect_group(names)
+    for _, group in ipairs(GROUPS) do
+        local all = true
+        for _, name in ipairs(names) do
+            if not track_matches_group(name, group.words) then all = false break end
+        end
+        if all then return group.name end
+    end
+    return nil
+end
+
+-- "kamera 1" -> "Kamera 1" (first capital, rest lowercase)
+local function format_pair_base(base)
+    if base == "" then return "" end
+    return base:sub(1, 1):upper() .. base:sub(2):lower()
 end
 
 -- If the two names form a recognized pair, return the left track index (1 or 2).
@@ -75,24 +125,40 @@ function main()
         return
     end
 
-    -- Collect selected tracks (pointers stay valid across insertion)
-    local sel_tracks = {}
+    -- Collect selected tracks (pointers stay valid across insertion) and names
+    local sel_tracks, sel_names = {}, {}
     for i = 0, sel_count - 1 do
-        sel_tracks[#sel_tracks + 1] = reaper.GetSelectedTrack(0, i)
+        local track = reaper.GetSelectedTrack(0, i)
+        local _, name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+        sel_tracks[#sel_tracks + 1] = track
+        sel_names[#sel_names + 1] = name
     end
+
+    -- Stereo-pair detection (exactly two tracks)
+    local left_idx = (sel_count == 2) and detect_lr_pair(sel_names[1], sel_names[2]) or nil
+
+    -- Folder name suggestion: pair base name, else common instrument group
+    local suggestion = ""
+    if left_idx then
+        local base = sel_names[1]:match("^(.-)[%s%._%-/]+[^%s%._%-/]+$") or ""
+        base = base:gsub("^%s+", ""):gsub("[%s%._%-/]+$", "")
+        suggestion = format_pair_base(base)
+    end
+    if suggestion == "" then
+        suggestion = detect_group(sel_names) or ""
+    end
+    suggestion = suggestion:gsub(",", "") -- commas would break the CSV field
 
     -- Ask for the folder name (cancel = create unnamed folder)
     local name_ok, folder_name = reaper.GetUserInputs(
-        "Smart Insert Track", 1, "Folder track name:,extrawidth=120", ""
+        "Smart Insert Track", 1, "Folder track name:,extrawidth=120", suggestion
     )
     if not name_ok then folder_name = "" end
 
     -- Exactly two tracks with stereo-pair suffixes: offer L/R panning
     local left_track, right_track
     if sel_count == 2 then
-        local _, name1 = reaper.GetSetMediaTrackInfo_String(sel_tracks[1], "P_NAME", "", false)
-        local _, name2 = reaper.GetSetMediaTrackInfo_String(sel_tracks[2], "P_NAME", "", false)
-        local left_idx = detect_lr_pair(name1, name2)
+        local name1, name2 = sel_names[1], sel_names[2]
         if left_idx then
             local l_name = (left_idx == 1) and name1 or name2
             local r_name = (left_idx == 1) and name2 or name1

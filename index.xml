@@ -193,6 +193,10 @@
         <changelog><![CDATA[Positional suffix pairs (Hi/Lo, High/Low, Upper/Lower) pan by track order: upper track in the TCP goes left, lower goes right]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Smart_Insert_Track.lua</source>
       </version>
+      <version name="1.2.0" author="Julius Gass">
+        <changelog><![CDATA[Pre-fill folder name suggestion: common base name for stereo pairs ("Kamera 1 L/R" -> "Kamera 1"), or instrument group in caps (Kick+Snare+... -> "DRUMS")]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Smart_Insert_Track.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Sort_Items_To_Tracks_By_Prefix.lua" type="script" desc="JG Sort Items To Tracks By Prefix">
