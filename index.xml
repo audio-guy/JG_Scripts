@@ -189,6 +189,10 @@
         <changelog><![CDATA[Ask for folder track name on creation; detect stereo-pair suffixes (L/R, Left/Right, Hi/Lo, Links/Rechts, ...) on exactly two tracks and offer to pan them hard L/R]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Smart_Insert_Track.lua</source>
       </version>
+      <version name="1.1.1" author="Julius Gass">
+        <changelog><![CDATA[Positional suffix pairs (Hi/Lo, High/Low, Upper/Lower) pan by track order: upper track in the TCP goes left, lower goes right]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Smart_Insert_Track.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Sort_Items_To_Tracks_By_Prefix.lua" type="script" desc="JG Sort Items To Tracks By Prefix">

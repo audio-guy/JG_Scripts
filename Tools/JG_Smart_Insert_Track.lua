@@ -1,24 +1,25 @@
 -- @description Smart Insert Track (insert track or folder for selection)
 -- @author JG
--- @version 1.1.0
+-- @version 1.1.1
 -- @changelog
---   Ask for the folder track name on creation.
---   Detect stereo-pair suffixes (L/R, Left/Right, Hi/Lo, ...) on exactly two
---   tracks and offer to pan them hard left/right.
+--   Positional suffix pairs (Hi/Lo, High/Low, Upper/Lower) now pan by track
+--   order: upper track in the TCP goes left, lower goes right.
 -- @about
 --   Inserts a new track like action 40001. If multiple tracks are selected,
 --   offers to create a folder track containing the selected tracks instead.
 
 -- Suffix pairs that suggest a dual-mono / stereo pair.
--- First entry pans left, second pans right.
+-- directional: the suffix says which side (first entry = left).
+-- positional (directional=false): suffixes carry no side info -> the upper
+-- track (first in the TCP) pans left, the lower one right.
 local PAIR_SUFFIXES = {
-    { "l",     "r" },
-    { "left",  "right" },
-    { "links", "rechts" },
-    { "li",    "re" },
-    { "lo",    "hi" },
-    { "low",   "high" },
-    { "lower", "upper" },
+    { "l",     "r",      directional = true },
+    { "left",  "right",  directional = true },
+    { "links", "rechts", directional = true },
+    { "li",    "re",     directional = true },
+    { "lo",    "hi",     directional = false },
+    { "low",   "high",   directional = false },
+    { "lower", "upper",  directional = false },
 }
 
 -- Split a track name into (base, suffix-token). The suffix is the last token
@@ -37,13 +38,17 @@ local function split_suffix(name)
 end
 
 -- If the two names form a recognized pair, return the left track index (1 or 2).
+-- Names are passed in track order (1 = upper track in the TCP).
 local function detect_lr_pair(name1, name2)
     local base1, suf1 = split_suffix(name1)
     local base2, suf2 = split_suffix(name2)
     if base1 ~= base2 then return nil end
     for _, pair in ipairs(PAIR_SUFFIXES) do
-        if suf1 == pair[1] and suf2 == pair[2] then return 1 end
-        if suf1 == pair[2] and suf2 == pair[1] then return 2 end
+        if (suf1 == pair[1] and suf2 == pair[2]) or
+           (suf1 == pair[2] and suf2 == pair[1]) then
+            if not pair.directional then return 1 end -- upper track pans left
+            return (suf1 == pair[1]) and 1 or 2
+        end
     end
     return nil
 end
