@@ -1,10 +1,8 @@
 -- @description Smart Insert Track (insert track or folder for selection)
 -- @author JG
--- @version 1.2.0
+-- @version 1.2.1
 -- @changelog
---   Pre-fill the folder name field with a suggestion: the common base name
---   for stereo pairs ("Kamera 1 L/R" -> "Kamera 1"), or the instrument
---   group in caps ("Kick"+"Snare"+... -> "DRUMS").
+--   Pair base-name suggestion keeps the original casing (no reformatting).
 -- @about
 --   Inserts a new track like action 40001. If multiple tracks are selected,
 --   offers to create a folder track containing the selected tracks instead.
@@ -81,12 +79,6 @@ local function detect_group(names)
     return nil
 end
 
--- "kamera 1" -> "Kamera 1" (first capital, rest lowercase)
-local function format_pair_base(base)
-    if base == "" then return "" end
-    return base:sub(1, 1):upper() .. base:sub(2):lower()
-end
-
 -- If the two names form a recognized pair, return the left track index (1 or 2).
 -- Names are passed in track order (1 = upper track in the TCP).
 local function detect_lr_pair(name1, name2)
@@ -141,8 +133,7 @@ function main()
     local suggestion = ""
     if left_idx then
         local base = sel_names[1]:match("^(.-)[%s%._%-/]+[^%s%._%-/]+$") or ""
-        base = base:gsub("^%s+", ""):gsub("[%s%._%-/]+$", "")
-        suggestion = format_pair_base(base)
+        suggestion = base:gsub("^%s+", ""):gsub("[%s%._%-/]+$", "")
     end
     if suggestion == "" then
         suggestion = detect_group(sel_names) or ""
