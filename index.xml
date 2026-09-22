@@ -225,10 +225,10 @@
       </version>
     </reapack>
 
-    <reapack name="JG_Transfer_Item_Properties.lua" type="script" desc="JG Transfer Item Properties">
-      <version name="2.0.0" author="Julius Gass">
-        <changelog><![CDATA[Successor of JG_Transfer_Item_Cuts_Gaps_And_Fades (renamed — please uninstall the old package). Transfers item structure AND any combination of item properties from one reference track to all other tracks with selected items. ReaImGui dialog: pick the reference track (default = topmost selected track) and tick what to transfer — cuts & gaps (with optional deletion of material outside the reference range), fades (length, shape, curvature, auto-crossfade), item gain, mute, colour, snap offset, notes, lock/loop/timebase/play-all-takes, group ID, take volume/pan/pan law (incl. phase invert), take name, pitch/playrate/preserve pitch, channel mode, the item FX chain and the take envelopes (volume/pan/mute/pitch). FX chains and take envelopes are copied via the item state chunk with regenerated FX/envelope GUIDs. The checkbox selection is remembered across sessions. Also fixes the fade shape never being copied in 1.0.0 (wrong parameter names D_FADEINTYPE/D_FADEOUTTYPE instead of C_FADEINSHAPE/C_FADEOUTSHAPE).]]></changelog>
-        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Transfer_Item_Properties.lua</source>
+    <reapack name="JG_Copy_Item_Properties.lua" type="script" desc="JG Copy Item Properties">
+      <version name="2.1.0" author="Julius Gass">
+        <changelog><![CDATA[Renamed from JG_Transfer_Item_Properties (please uninstall the old package and install JG_Copy_Item_Properties). Existing checkbox preferences are preserved. Fix: cuts, gap deletion, outside-range deletion and property copying now affect only selected target items and their split pieces. Unselected items on target tracks remain unchanged.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Item_Properties.lua</source>
       </version>
     </reapack>
 

@@ -1,19 +1,19 @@
--- @description Transfer item properties
+-- @description Copy item properties
 -- @author JG
--- @version 2.0.0
+-- @version 2.1.0
 -- @about
---   Transfers the item structure (cuts / gaps) and any combination of item
---   properties from ONE reference track to all other tracks that have items
---   selected.
+--   Copies the item structure (cuts / gaps) and any combination of item
+--   properties from selected items on ONE reference track to selected items on the
+--   other tracks. Unselected items are never modified.
 --
 --   Reference track
 --     Pick it in the dialog. The default is the TOPMOST of the tracks that
 --     have selected items.
 --
 --   Structure ("Cuts & gaps")
---     Target tracks are split at every edge of the reference items, and every
+--     Selected target items are split at every edge of the reference items, and every
 --     piece that falls into a gap of the reference is deleted. Optionally,
---     material outside the reference range is deleted as well.
+--     selected material outside the reference range is deleted as well.
 --
 --   Properties
 --     Everything else is opt-in per checkbox: fades, item gain, take
@@ -36,6 +36,7 @@ if not r.ImGui_CreateContext then
   return
 end
 
+-- Keep the existing preference namespace across the rename.
 local EXT = "JG_TransferItemProperties"
 local TOL = 0.0001
 
@@ -46,7 +47,7 @@ local OPTIONS = {
   { key = "cuts",     head = "Structure",
     label = "Cuts & gaps  (split at reference edges, delete gaps)", default = true },
   { key = "outside",  dep = "cuts", indent = true,
-    label = "…also delete material outside the reference range",    default = true },
+    label = "…also delete selected material outside the reference range",    default = true },
 
   { key = "fades",    head = "Item",
     label = "Fades  (length, shape, curvature, auto-crossfade)",     default = true },
@@ -232,9 +233,9 @@ local function mergeBlocks(dstChunk, srcChunk, names)
 end
 
 -- ════════════════════════════════════════════════════════════════════════
---  Property transfer
+--  Property copy
 -- ════════════════════════════════════════════════════════════════════════
-local function transferProps(dst, src, srcChunks)
+local function copyProps(dst, src, srcChunks)
   -- 1. Chunk-based parts first — SetItemStateChunk invalidates take pointers.
   local names = {}
   if opt.fx  then names.TAKEFX = true end
@@ -323,20 +324,6 @@ local function collectSelection()
   return list
 end
 
-local function trackItems(track)
-  local items = {}
-  for i = 0, r.CountTrackMediaItems(track) - 1 do
-    local it = r.GetTrackMediaItem(track, i)
-    items[#items+1] = {
-      item = it,
-      pos  = r.GetMediaItemInfo_Value(it, "D_POSITION"),
-      len  = r.GetMediaItemInfo_Value(it, "D_LENGTH"),
-    }
-  end
-  table.sort(items, function(a, b) return a.pos < b.pos end)
-  return items
-end
-
 -- ════════════════════════════════════════════════════════════════════════
 --  Main operation
 -- ════════════════════════════════════════════════════════════════════════
@@ -392,34 +379,46 @@ local function run(tracks, refIdx)
   for ti = 1, #tracks do
     if ti ~= refIdx then
       local tgt = tracks[ti]
+      -- Only the selection captured for this operation and its split descendants
+      -- may be changed. Never expand the scope to all items on the track.
+      local pieces = {}
+      for _, it in ipairs(tgt.items) do
+        pieces[#pieces+1] = { item = it.item, pos = it.pos, len = it.len }
+      end
 
       if opt.cuts then
         -- Split at every reference edge. Splits are sorted, and SplitMediaItem
         -- hands back the right-hand piece, so each item is walked exactly once.
-        for _, it in ipairs(trackItems(tgt.track)) do
+        local originals = #pieces
+        for i = 1, originals do
+          local it = pieces[i]
           local cur, pos, len = it.item, it.pos, it.len
           for _, sp in ipairs(splits) do
             if sp > pos + TOL and sp < pos + len - TOL then
               local right = r.SplitMediaItem(cur, sp)
               if right then
+                it.len = sp - pos
                 len = pos + len - sp
                 pos = sp
                 cur = right
+                it = { item = right, pos = pos, len = len }
+                pieces[#pieces+1] = it
               end
             end
           end
         end
         -- Delete gap pieces (and, optionally, everything outside the range).
-        local doomed = {}
-        for _, it in ipairs(trackItems(tgt.track)) do
+        local doomed, kept = {}, {}
+        for _, it in ipairs(pieces) do
           local mid = it.pos + it.len / 2
           local outside = mid < rangeStart - TOL or mid >= rangeEnd - TOL
-          if outside then
-            if opt.outside then doomed[#doomed+1] = it.item end
-          elseif not inKeep(mid) then
+          if (outside and opt.outside) or (not outside and not inKeep(mid)) then
             doomed[#doomed+1] = it.item
+          else
+            kept[#kept+1] = it
           end
         end
+        pieces = kept
         for _, it in ipairs(doomed) do
           r.DeleteTrackMediaItem(tgt.track, it)
           removed = removed + 1
@@ -427,12 +426,12 @@ local function run(tracks, refIdx)
       end
 
       if anyProp then
-        for _, it in ipairs(trackItems(tgt.track)) do
+        for _, it in ipairs(pieces) do
           local mid = it.pos + it.len / 2
           if mid >= rangeStart - TOL and mid < rangeEnd - TOL then
             local s = srcFor(it.pos, it.len)
             if s then
-              transferProps(it.item, s, srcChunks)
+              copyProps(it.item, s, srcChunks)
               touched = touched + 1
             end
           end
@@ -441,7 +440,7 @@ local function run(tracks, refIdx)
     end
   end
 
-  r.Undo_EndBlock("Transfer item properties", -1)
+  r.Undo_EndBlock("Copy item properties", -1)
   r.PreventUIRefresh(-1)
   r.UpdateArrange()
 
@@ -456,7 +455,7 @@ loadPrefs()
 
 local tracks = collectSelection()
 if #tracks < 2 then
-  r.MB("Select items on at least 2 tracks.", "Transfer Item Properties", 0)
+  r.MB("Select items on at least 2 tracks.", "Copy Item Properties", 0)
   return
 end
 
@@ -464,7 +463,7 @@ local refGuid = tracks[1].guid          -- default: topmost selected track
 local status  = "Pick the reference track, then Apply."
 local dirty   = false
 
-local ctx  = r.ImGui_CreateContext("JG Transfer Item Properties")
+local ctx  = r.ImGui_CreateContext("JG Copy Item Properties")
 local font = r.ImGui_CreateFont("sans-serif", 14)
 r.ImGui_Attach(ctx, font)
 
@@ -491,8 +490,8 @@ end
 
 local function drawGUI()
   r.ImGui_TextWrapped(ctx,
-    "Copies the item structure and the selected properties from the reference track " ..
-    "to every other track that has items selected.")
+    "Copies structure and enabled properties from selected reference items " ..
+    "to selected items on the other tracks. Unselected items stay unchanged.")
   r.ImGui_Separator(ctx)
 
   r.ImGui_Text(ctx, "Reference track:")
@@ -507,7 +506,7 @@ local function drawGUI()
   end
 
   r.ImGui_Separator(ctx)
-  r.ImGui_Text(ctx, "Transfer:")
+  r.ImGui_Text(ctx, "Copy:")
 
   for _, o in ipairs(OPTIONS) do
     if o.head then
@@ -550,7 +549,7 @@ local function loop()
   r.ImGui_PushFont(ctx, font, 14)
   r.ImGui_SetNextWindowSize(ctx, 520, 640, r.ImGui_Cond_FirstUseEver())
   local flags = r.ImGui_WindowFlags_NoCollapse()
-  local visible, open = r.ImGui_Begin(ctx, "JG Transfer Item Properties", true, flags)
+  local visible, open = r.ImGui_Begin(ctx, "JG Copy Item Properties", true, flags)
   if visible then
     drawGUI()
     r.ImGui_Spacing(ctx)
