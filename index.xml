@@ -226,6 +226,10 @@
     </reapack>
 
     <reapack name="JG_Copy_Item_Properties.lua" type="script" desc="JG Copy Item Properties">
+      <version name="2.2.0" author="Julius Gass">
+        <changelog><![CDATA[Add persistent named presets for all copy options. Click a preset to load it; edit and update it, save as new, rename or delete it. Unsaved changes are indicated. Presets store options only, not track or item selections. Loading a preset does not apply changes to items.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Item_Properties.lua</source>
+      </version>
       <version name="2.1.0" author="Julius Gass">
         <changelog><![CDATA[Renamed from JG_Transfer_Item_Properties (please uninstall the old package and install JG_Copy_Item_Properties). Existing checkbox preferences are preserved. Fix: cuts, gap deletion, outside-range deletion and property copying now affect only selected target items and their split pieces. Unselected items on target tracks remain unchanged.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Item_Properties.lua</source>

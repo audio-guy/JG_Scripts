@@ -1,6 +1,6 @@
 -- @description Copy item properties
 -- @author JG
--- @version 2.1.0
+-- @version 2.2.0
 -- @about
 --   Copies the item structure (cuts / gaps) and any combination of item
 --   properties from selected items on ONE reference track to selected items on the
@@ -25,6 +25,9 @@
 --     their FX/envelope GUIDs are regenerated so the copies stay independent.
 --
 --   The checkbox selection is remembered across sessions (ExtState).
+--   Named presets store all checkboxes, independently of tracks and projects.
+--   Click a preset to load it, then Apply to copy. Edit the checkboxes and
+--   update the preset, or save a new one. Presets can be renamed and deleted.
 --
 --   Requires ReaImGui (ReaPack: Extensions > ReaPack > Browse packages).
 
@@ -81,6 +84,118 @@ local function savePrefs()
   for _, o in ipairs(OPTIONS) do
     r.SetExtState(EXT, o.key, opt[o.key] and "1" or "0", true)
   end
+end
+
+-- Presets use stable option keys, not checkbox order. A single ExtState value
+-- avoids stale entries after rename/delete. Hex names keep the value single-line
+-- and preserve UTF-8 and delimiter characters without evaluating stored code.
+local presets, activePreset = {}, nil
+
+local function snapshotOptions()
+  local values = {}
+  for _, o in ipairs(OPTIONS) do values[o.key] = opt[o.key] == true end
+  return values
+end
+
+local function presetModified()
+  if not activePreset then return false end
+  for _, o in ipairs(OPTIONS) do
+    if opt[o.key] ~= activePreset.values[o.key] then return true end
+  end
+  return false
+end
+
+local function savePresets()
+  local records = { "v1" }
+  for _, preset in ipairs(presets) do
+    local name = preset.name:gsub(".", function(c) return string.format("%02X", c:byte()) end)
+    local fields = {}
+    for _, o in ipairs(OPTIONS) do
+      fields[#fields+1] = o.key .. "=" .. (preset.values[o.key] and "1" or "0")
+    end
+    records[#records+1] = name .. "|" .. table.concat(fields, ",")
+  end
+  r.SetExtState(EXT, "presets", table.concat(records, ";"), true)
+  r.SetExtState(EXT, "active_preset", activePreset and activePreset.name or "", true)
+end
+
+local function validPresetName(name, except)
+  name = name:match("^%s*(.-)%s*$")
+  if name == "" then return nil, "Enter a preset name." end
+  if name:find("%c") or name:find("##", 1, true) then
+    return nil, "Names cannot contain control characters or ##."
+  end
+  for _, preset in ipairs(presets) do
+    if preset ~= except and preset.name:lower() == name:lower() then
+      return nil, "That name already exists. Choose another name or use Update preset."
+    end
+  end
+  return name
+end
+
+local function loadPresets()
+  presets, activePreset = {}, nil
+  local stored = r.GetExtState(EXT, "presets")
+  if stored ~= "v1" and stored:sub(1, 3) ~= "v1;" then return end
+  local active = r.GetExtState(EXT, "active_preset")
+  for record in stored:sub(4):gmatch("[^;]+") do
+    local encoded, fields = record:match("^(%x+)|(.+)$")
+    if encoded and #encoded % 2 == 0 then
+      local name = encoded:gsub("%x%x", function(hex) return string.char(tonumber(hex, 16)) end)
+      name = validPresetName(name)
+      if name then
+        local values = {}
+        -- New options remain off in older presets until explicitly enabled.
+        for _, o in ipairs(OPTIONS) do values[o.key] = false end
+        for key, value in fields:gmatch("([%w_]+)=([01])") do
+          if values[key] ~= nil then values[key] = value == "1" end
+        end
+        local preset = { name = name, values = values }
+        presets[#presets+1] = preset
+        if name == active then activePreset = preset end
+      end
+    end
+  end
+end
+
+local function selectPreset(preset)
+  activePreset = preset
+  for _, o in ipairs(OPTIONS) do opt[o.key] = preset.values[o.key] end
+  savePrefs()
+  r.SetExtState(EXT, "active_preset", preset.name, true)
+end
+
+local function createPreset(name)
+  local checked, err = validPresetName(name)
+  if not checked then return nil, err end
+  activePreset = { name = checked, values = snapshotOptions() }
+  presets[#presets+1] = activePreset
+  savePresets()
+  return activePreset
+end
+
+local function updatePreset()
+  if not activePreset then return end
+  activePreset.values = snapshotOptions()
+  savePresets()
+end
+
+local function renamePreset(name)
+  if not activePreset then return nil, "Select a preset first." end
+  local checked, err = validPresetName(name, activePreset)
+  if not checked then return nil, err end
+  activePreset.name = checked
+  savePresets()
+  return activePreset
+end
+
+local function deletePreset()
+  if not activePreset then return end
+  for i, preset in ipairs(presets) do
+    if preset == activePreset then table.remove(presets, i); break end
+  end
+  activePreset = nil
+  savePresets()
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -452,6 +567,7 @@ end
 --  GUI
 -- ════════════════════════════════════════════════════════════════════════
 loadPrefs()
+loadPresets()
 
 local tracks = collectSelection()
 if #tracks < 2 then
@@ -462,6 +578,9 @@ end
 local refGuid = tracks[1].guid          -- default: topmost selected track
 local status  = "Pick the reference track, then Apply."
 local dirty   = false
+local presetName = activePreset and activePreset.name or ""
+local presetMessage = ""
+local confirmDelete = false
 
 local ctx  = r.ImGui_CreateContext("JG Copy Item Properties")
 local font = r.ImGui_CreateFont("sans-serif", 14)
@@ -488,6 +607,61 @@ local function refresh(force)
   if not refIndex() then refGuid = tracks[1] and tracks[1].guid or nil end
 end
 
+local function drawPresets()
+  r.ImGui_Text(ctx, "Presets")
+  if #presets == 0 then
+    r.ImGui_TextWrapped(ctx, "Choose options below, enter a name, then Save as new.")
+  else
+    if r.ImGui_BeginChild(ctx, "##presets", 0, 78) then
+      for i, preset in ipairs(presets) do
+        if r.ImGui_Selectable(ctx, preset.name .. "###preset" .. i, preset == activePreset) then
+          selectPreset(preset)
+          presetName, presetMessage, confirmDelete = preset.name, "Preset loaded. Click Apply to copy.", false
+        end
+      end
+    end
+    r.ImGui_EndChild(ctx)
+  end
+  if activePreset and presetModified() then
+    r.ImGui_TextWrapped(ctx, "Modified: update the preset or save as new to keep these changes.")
+  end
+  local changed, name = r.ImGui_InputText(ctx, "Preset name", presetName)
+  if changed then presetName = name; presetMessage = ""; confirmDelete = false end
+  if r.ImGui_Button(ctx, "Save as new") then
+    local preset, err = createPreset(presetName)
+    presetMessage = err or "New preset saved."
+    if preset then presetName = preset.name end
+    confirmDelete = false
+  end
+  r.ImGui_SameLine(ctx)
+  if not activePreset then r.ImGui_BeginDisabled(ctx, true) end
+  if r.ImGui_Button(ctx, "Update preset") then
+    updatePreset()
+    presetMessage, confirmDelete = "Preset options updated.", false
+  end
+  r.ImGui_SameLine(ctx)
+  if r.ImGui_Button(ctx, "Rename") then
+    local preset, err = renamePreset(presetName)
+    presetMessage = err or "Preset renamed."
+    if preset then presetName = preset.name end
+    confirmDelete = false
+  end
+  r.ImGui_SameLine(ctx)
+  if r.ImGui_Button(ctx, "Delete") then confirmDelete = true end
+  if not activePreset then r.ImGui_EndDisabled(ctx) end
+  if confirmDelete and activePreset then
+    r.ImGui_TextWrapped(ctx, 'Delete preset "' .. activePreset.name .. '"?')
+    if r.ImGui_Button(ctx, "Delete preset") then
+      deletePreset()
+      presetName, presetMessage, confirmDelete = "", "Preset deleted. Current options kept.", false
+    end
+    r.ImGui_SameLine(ctx)
+    if r.ImGui_Button(ctx, "Cancel") then confirmDelete = false end
+  end
+  if presetMessage ~= "" then r.ImGui_TextWrapped(ctx, presetMessage) end
+  r.ImGui_Separator(ctx)
+end
+
 local function drawGUI()
   r.ImGui_TextWrapped(ctx,
     "Copies structure and enabled properties from selected reference items " ..
@@ -506,6 +680,7 @@ local function drawGUI()
   end
 
   r.ImGui_Separator(ctx)
+  drawPresets()
   r.ImGui_Text(ctx, "Copy:")
 
   for _, o in ipairs(OPTIONS) do
@@ -547,7 +722,7 @@ local applyNow, closeNow = false, false
 local function loop()
   refresh()
   r.ImGui_PushFont(ctx, font, 14)
-  r.ImGui_SetNextWindowSize(ctx, 520, 640, r.ImGui_Cond_FirstUseEver())
+  r.ImGui_SetNextWindowSize(ctx, 560, 850, r.ImGui_Cond_FirstUseEver())
   local flags = r.ImGui_WindowFlags_NoCollapse()
   local visible, open = r.ImGui_Begin(ctx, "JG Copy Item Properties", true, flags)
   if visible then
