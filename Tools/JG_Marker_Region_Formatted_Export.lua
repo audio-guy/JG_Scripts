@@ -1,6 +1,6 @@
 -- @description Marker/Region Formatted Export (PDF)
 -- @author JG
--- @version 1.2.1
+-- @version 1.2.2
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -9,10 +9,10 @@
 --
 --   "Songs" are detected by any combination of four strategies (configurable):
 --     1. Lane (= marker/region colour group) marked as "Song-Lane"
---     2. All regions count as songs ("Regionen = Songs" toggle)
+--     2. All regions count as songs ("Regions count as songs" toggle)
 --     3. Name starts with a configurable prefix trigger (e.g. "*")
 --     4. NOT on the blacklist (acts as veto — kills false positives like
---        "Beifall, Applaus, Moderation, Ansage, …")
+--        "Applause, Speech, Announcement, …")
 --
 --   Time base: Timeline (default, follows project ruler), H:MM:SS or bar.beat.
 --   Optional length column; without it Start is labelled Position.
@@ -48,7 +48,7 @@ local prefs = {
   showLength   = true,
   regionAsSong = true,
   prefix       = "",
-  blacklist    = "Beifall, Applaus, Moderation, Ansage, Pause, Intro, Outro, Soundcheck",
+  blacklist    = "Applause, Speech, Announcement, Break, Intro, Outro, Soundcheck",
 }
 
 local proj = {
@@ -388,8 +388,8 @@ end
 -- A blacklist entry vetoes a song match only if the marker name STARTS with
 -- that word (case-insensitive), followed by a word boundary or end-of-name.
 -- Anchored-at-start avoids false-positives like the "Intro" entry vetoing
--- "Élida Almeida: Intro zu Txika" — categorical markers in practice always
--- begin with the category word ("Beifall …", "Ansage …", "Intro", "Outro").
+-- "Artist: Intro to Song" — categorical markers in practice always
+-- begin with the category word ("Applause …", "Announcement …", "Intro", "Outro").
 local function isBlacklisted(name, blacklist)
   if not name or name == "" then return false end
   local low = (name:lower():match("^%s*(.-)%s*$")) or name:lower()
@@ -659,6 +659,29 @@ end
 -- ════════════════════════════════════════════════════════════════════════
 --  Layout: build pages from rows
 -- ════════════════════════════════════════════════════════════════════════
+-- Share column visibility and labels across preview, PDF and text output.
+local function exportColumns(rows)
+  local present = {}
+  for _, row in ipairs(rows) do
+    for _, key in ipairs({ "num", "start", "len", "name" }) do
+      if row[key] and row[key]:find("%S") then present[key] = true end
+    end
+  end
+  local length = prefs.showLength and present.len
+  local columns = {}
+  for _, col in ipairs({
+    { key = "num", label = "#", width = 30 },
+    { key = "start", label = length and "Start" or "Position", width = 150 },
+    { key = "len", label = "Length", width = 60 },
+    { key = "name", label = "Name" },
+  }) do
+    if present[col.key] and (col.key ~= "len" or length) then
+      columns[#columns + 1] = col
+    end
+  end
+  return columns
+end
+
 local function buildPages(rows, meta)
   -- rows[i] = { num="1", start="0:00", len="3:45", name="Song A", isSong=true }
   -- meta   = { title, subtitle, footerLines = {...} }
@@ -675,16 +698,21 @@ local function buildPages(rows, meta)
   local FS_SUB      = 10
   local FS_FOOT     = 9
 
-  -- column right edges (right-aligned numerics)
-  local X_NUM_R   = LM + 28
-  local startWidth = 70
-  for _, row in ipairs(rows) do
-    startWidth = math.max(startWidth, textWidth(row.start or "", FS_BODY, row.isSong))
+  local columns = exportColumns(rows)
+  local x = LM
+  for _, col in ipairs(columns) do
+    if col.key == "name" then
+      col.x = x
+    else
+      local width = col.key == "num" and 28 or (col.key == "start" and 70 or 60)
+      for _, row in ipairs(rows) do
+        width = math.max(width, textWidth(row[col.key] or "", FS_BODY, row.isSong))
+      end
+      col.x = x + width
+      x = col.x + 15
+    end
   end
-  local X_START_R = X_NUM_R + 15 + startWidth
-  local X_LEN_R   = X_START_R + 75
-  local X_NAME_L  = (prefs.showLength and X_LEN_R or X_START_R) + 15
-  local X_RIGHT   = PAGE_W - RM
+  local X_RIGHT = PAGE_W - RM
 
   local function newPage()
     ops = {}
@@ -709,10 +737,13 @@ local function buildPages(rows, meta)
   y = y - 14
 
   local function drawHeaderRow(yPos)
-    pushRightAligned("#",     X_NUM_R,   yPos, true, FS_HEAD)
-    pushRightAligned(prefs.showLength and "Start" or "Position", X_START_R, yPos, true, FS_HEAD)
-    if prefs.showLength then pushRightAligned("Länge", X_LEN_R, yPos, true, FS_HEAD) end
-    ops[#ops+1] = { x = X_NAME_L, y = yPos, text = "Name", bold = true, size = FS_HEAD }
+    for _, col in ipairs(columns) do
+      if col.key == "name" then
+        ops[#ops+1] = { x = col.x, y = yPos, text = col.label, bold = true, size = FS_HEAD }
+      else
+        pushRightAligned(col.label, col.x, yPos, true, FS_HEAD)
+      end
+    end
   end
 
   drawHeaderRow(y)
@@ -725,11 +756,12 @@ local function buildPages(rows, meta)
       y = y - LINE_H
     end
     local bold = row.isSong == true
-    pushRightAligned(row.num,   X_NUM_R,   y, bold, FS_BODY)
-    pushRightAligned(row.start, X_START_R, y, bold, FS_BODY)
-    if prefs.showLength then pushRightAligned(row.len, X_LEN_R, y, bold, FS_BODY) end
-    if row.name and row.name ~= "" then
-      ops[#ops+1] = { x = X_NAME_L, y = y, text = row.name, bold = bold, size = FS_BODY }
+    for _, col in ipairs(columns) do
+      if col.key == "name" then
+        ops[#ops+1] = { x = col.x, y = y, text = row.name or "", bold = bold, size = FS_BODY }
+      else
+        pushRightAligned(row[col.key], col.x, y, bold, FS_BODY)
+      end
     end
     y = y - LINE_H
   end
@@ -824,7 +856,7 @@ local function buildRowsAndStats()
     rows[#rows+1] = row
   end
 
-  local brutto = 0
+  local grossDuration = 0
   if #visible > 0 then
     local first, last = math.huge, -math.huge
     for _, it in ipairs(visible) do
@@ -832,13 +864,13 @@ local function buildRowsAndStats()
       local e = it.endPos or it.pos
       if e > last then last = e end
     end
-    if first < last then brutto = last - first end
+    if first < last then grossDuration = last - first end
   end
 
   local stats = {
     songCount = songCount,
     netMusic  = netMusic,
-    brutto    = brutto,
+    grossDuration    = grossDuration,
     total     = #items,
     shown     = #visible,
   }
@@ -907,7 +939,7 @@ local function makeMeta(stats)
     dateline = "Exported " .. os.date("%Y-%m-%d %H:%M"),
     footerLines = {
       string.format("Songs: %d   ·   Net music: %s   ·   Gross duration: %s",
-                    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.brutto)),
+                    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.grossDuration)),
       string.format("%d of %d items shown.", stats.shown, stats.total),
     },
   }
@@ -939,18 +971,17 @@ local function exportText()
     state.status = "No markers or regions to copy."
     return
   end
-  local lines = {}
+  local lines, columns = {}, exportColumns(rows)
   for _, row in ipairs(rows) do
-    local columns = { row.num or "", row.start or "" }
-    if prefs.showLength then columns[#columns + 1] = row.len or "" end
-    columns[#columns + 1] = row.name or ""
-    lines[#lines+1] = table.concat(columns, "\t")
+    local cells = {}
+    for _, col in ipairs(columns) do cells[#cells + 1] = row[col.key] or "" end
+    lines[#lines+1] = table.concat(cells, "\t")
   end
   lines[#lines+1] = ""
   lines[#lines+1] = string.format("Project: %s   Exported %s",
     projectName(), os.date("%Y-%m-%d"))
   lines[#lines+1] = string.format("Songs: %d   Net music: %s   Gross: %s",
-    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.brutto))
+    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.grossDuration))
   r.CF_SetClipboard(table.concat(lines, "\n"))
   state.status = string.format("Copied %d rows to clipboard.", #rows)
 end
@@ -1054,15 +1085,19 @@ local function drawPreviewTable(rows)
     r.ImGui_TextDisabled(ctx, "(Nothing to preview — adjust lanes or name filters.)")
     return
   end
+  local columns = exportColumns(rows)
   local childFlags = (r.ImGui_ChildFlags_Border and r.ImGui_ChildFlags_Border()) or 0
   if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, childFlags) then
-    if r.ImGui_BeginTable(ctx, "preview", prefs.showLength and 5 or 4,
+    if r.ImGui_BeginTable(ctx, "preview", #columns + 1,
          r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
       r.ImGui_TableSetupColumn(ctx, "Song",  r.ImGui_TableColumnFlags_WidthFixed(), 46)
-      r.ImGui_TableSetupColumn(ctx, "#",     r.ImGui_TableColumnFlags_WidthFixed(), 30)
-      r.ImGui_TableSetupColumn(ctx, prefs.showLength and "Start" or "Position", r.ImGui_TableColumnFlags_WidthFixed(), 150)
-      if prefs.showLength then r.ImGui_TableSetupColumn(ctx, "Länge", r.ImGui_TableColumnFlags_WidthFixed(), 60) end
-      r.ImGui_TableSetupColumn(ctx, "Name")
+      for _, col in ipairs(columns) do
+        if col.width then
+          r.ImGui_TableSetupColumn(ctx, col.label, r.ImGui_TableColumnFlags_WidthFixed(), col.width)
+        else
+          r.ImGui_TableSetupColumn(ctx, col.label)
+        end
+      end
       r.ImGui_TableHeadersRow(ctx)
       for i, row in ipairs(rows) do
         r.ImGui_TableNextRow(ctx)
@@ -1076,18 +1111,12 @@ local function drawPreviewTable(rows)
         else
           r.ImGui_TextDisabled(ctx, row.isSong and "S" or "·")
         end
-        r.ImGui_TableSetColumnIndex(ctx, 1)
-        r.ImGui_Text(ctx, row.num or "")
-        r.ImGui_TableSetColumnIndex(ctx, 2)
-        r.ImGui_Text(ctx, row.start or "")
-        if prefs.showLength then
-          r.ImGui_TableSetColumnIndex(ctx, 3)
-          r.ImGui_Text(ctx, row.len or "")
+        for columnIndex, col in ipairs(columns) do
+          r.ImGui_TableSetColumnIndex(ctx, columnIndex)
+          local value = row[col.key] or ""
+          if col.key == "name" and row.hasOverride then value = value .. "  *" end
+          r.ImGui_Text(ctx, value)
         end
-        r.ImGui_TableSetColumnIndex(ctx, prefs.showLength and 4 or 3)
-        local name = row.name or ""
-        if row.hasOverride then name = name .. "  *" end
-        r.ImGui_Text(ctx, name)
       end
       r.ImGui_EndTable(ctx)
     end
@@ -1201,7 +1230,7 @@ local function drawGUI()
   r.ImGui_Text(ctx, string.format(
     "Preview — %d rows, %d songs   ·   Net %s   ·   Gross %s",
     #previewRows, previewStats.songCount,
-    fmtHMS(previewStats.netMusic), fmtHMS(previewStats.brutto)))
+    fmtHMS(previewStats.netMusic), fmtHMS(previewStats.grossDuration)))
   drawPreviewTable(previewRows)
 
   r.ImGui_Separator(ctx)

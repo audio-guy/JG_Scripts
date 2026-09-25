@@ -39,9 +39,9 @@ for i = 0, count - 2 do
     if diff > 0 then
         local bpm = (60.0 * qn_multiplier) / diff
         
-        -- Nur Marker setzen, wenn sich das Tempo ändert
+        -- Only insert a marker when the tempo changes
         if math.abs(bpm - prev_bpm) > 0.001 then
-            -- Taktart nur beim allerersten Marker setzen, danach 0 (keine Änderung)
+            -- Set the time signature only on the first marker; use 0 afterward (no change)
             local m_num = (i == 0) and num or 0
             local m_den = (i == 0) and den or 0
             

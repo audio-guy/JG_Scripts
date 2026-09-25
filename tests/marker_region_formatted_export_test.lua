@@ -31,7 +31,7 @@ reaper = {
 local api = assert(load(source .. [[
 return {prefs=prefs, proj=proj, patterns=namePatterns, include=includeName,
 loadPrefs=loadPrefs, savePrefs=savePrefs, loadProj=loadProj, saveProj=saveProj,
-fmtPos=fmtPos, rows=buildRowsAndStats, pages=buildPages, pdf=buildPdf, text=exportText}
+columns=exportColumns, fmtPos=fmtPos, rows=buildRowsAndStats, pages=buildPages, pdf=buildPdf, text=exportText}
 ]], path))()
 local function matches(name, inc, exc)
   return api.include(name, api.patterns(inc or ''), api.patterns(exc or ''))
@@ -80,7 +80,7 @@ for _, show in ipairs({true, false}) do
   local start, position, length, nameX = false, false, false
   for _, op in ipairs(pages[1]) do
     start = start or op.text == 'Start'; position = position or op.text == 'Position'
-    length = length or op.text == 'Länge'
+    length = length or op.text == 'Length'
     if op.text == 'Name' then nameX = op.x end
   end
   assert(start == show and position == not show and length == show)
@@ -94,4 +94,23 @@ for _, show in ipairs({true, false}) do
     out:write(api.pdf(pages)); out:close()
   end
 end
-print('Marker/region export: filter, persistence, time, duration, layout and text checks passed')
+api.prefs.regionAsSong = false
+api.prefs.prefix = ""
+api.prefs.showLength = true
+rows = api.rows()
+local columns = api.columns(rows)
+assert(#columns == 2 and columns[1].label == "Position" and columns[2].label == "Name")
+api.text()
+assert(clipboard:match("^[^\n]+") == "01:00:00:12\t#Intro")
+local pages = api.pages(rows, meta)
+for _, op in ipairs(pages[1]) do
+  assert(op.text ~= "#" and op.text ~= "Start" and op.text ~= "Length")
+end
+assert(#api.columns({{start="0:00", name="  "}}) == 1)
+assert(#api.columns({{name="Only a name"}}) == 1)
+assert(#api.columns({{num="1", len="0:00"}, {name="Title"}}) == 3)
+if arg[1] then
+  local out=assert(io.open(arg[1] .. "-empty-columns.pdf", "wb"))
+  out:write(api.pdf(pages)); out:close()
+end
+print('Marker/region export: filter, persistence, time, duration, layout, empty columns and text checks passed')

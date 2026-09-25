@@ -45,6 +45,10 @@
       </version>
       <version name="1.2.1" author="Julius Gass">
         <changelog><![CDATA[Fix unresponsive window in large projects: share a cached project snapshot between lanes and preview, reuse derived rows until settings change, and refresh on project edits or tab changes. Faster marker-only project parsing and linear song-length calculation. Add Refresh for saved-file lane metadata. Keep settings isolated across project tabs and fix per-row Song toggle.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/ce5fbc7/Tools/JG_Marker_Region_Formatted_Export.lua</source>
+      </version>
+      <version name="1.2.2" author="Julius Gass">
+        <changelog><![CDATA[Use English consistently in the interface and PDF export: Length column, English default song blacklist and documentation. Automatically hide entirely empty columns in preview, PDF and text; use Position when no length column is visible. Existing user-entered names and saved filter patterns remain unchanged.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Marker_Region_Formatted_Export.lua</source>
       </version>
     </reapack>
