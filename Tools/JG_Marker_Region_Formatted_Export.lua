@@ -1,6 +1,6 @@
 -- @description Marker/Region Formatted Export (PDF)
 -- @author JG
--- @version 1.2.2
+-- @version 1.2.3
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -935,11 +935,8 @@ end
 local function makeMeta(stats)
   local m = {
     title    = projectName(),
-    subtitle = "Marker & Region Formatted Export",
     dateline = "Exported " .. os.date("%Y-%m-%d %H:%M"),
     footerLines = {
-      string.format("Songs: %d   ·   Net music: %s   ·   Gross duration: %s",
-                    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.grossDuration)),
       string.format("%d of %d items shown.", stats.shown, stats.total),
     },
   }
@@ -980,8 +977,6 @@ local function exportText()
   lines[#lines+1] = ""
   lines[#lines+1] = string.format("Project: %s   Exported %s",
     projectName(), os.date("%Y-%m-%d"))
-  lines[#lines+1] = string.format("Songs: %d   Net music: %s   Gross: %s",
-    stats.songCount, fmtHMS(stats.netMusic), fmtHMS(stats.grossDuration))
   r.CF_SetClipboard(table.concat(lines, "\n"))
   state.status = string.format("Copied %d rows to clipboard.", #rows)
 end

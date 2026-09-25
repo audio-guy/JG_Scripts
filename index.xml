@@ -49,6 +49,10 @@
       </version>
       <version name="1.2.2" author="Julius Gass">
         <changelog><![CDATA[Use English consistently in the interface and PDF export: Length column, English default song blacklist and documentation. Automatically hide entirely empty columns in preview, PDF and text; use Position when no length column is visible. Existing user-entered names and saved filter patterns remain unchanged.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/7e3e37a/Tools/JG_Marker_Region_Formatted_Export.lua</source>
+      </version>
+      <version name="1.2.3" author="Julius Gass">
+        <changelog><![CDATA[Remove the PDF export subtitle and song/net music/gross duration summary from PDF and text exports.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Marker_Region_Formatted_Export.lua</source>
       </version>
     </reapack>

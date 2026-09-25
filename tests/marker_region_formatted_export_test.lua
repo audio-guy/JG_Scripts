@@ -31,7 +31,7 @@ reaper = {
 local api = assert(load(source .. [[
 return {prefs=prefs, proj=proj, patterns=namePatterns, include=includeName,
 loadPrefs=loadPrefs, savePrefs=savePrefs, loadProj=loadProj, saveProj=saveProj,
-columns=exportColumns, fmtPos=fmtPos, rows=buildRowsAndStats, pages=buildPages, pdf=buildPdf, text=exportText}
+columns=exportColumns, fmtPos=fmtPos, rows=buildRowsAndStats, pages=buildPages, pdf=buildPdf, text=exportText, meta=makeMeta}
 ]], path))()
 local function matches(name, inc, exc)
   return api.include(name, api.patterns(inc or ''), api.patterns(exc or ''))
@@ -70,7 +70,9 @@ rows = api.rows(); assert(#rows == 1 and rows[1].name == 'Take.wav' and rows[1].
 api.proj.laneInclude['r:0'] = false; assert(#api.rows() == 0)
 api.proj.laneInclude = {}; api.proj.includeNames = ''
 rows = api.rows()
-local meta = {title='Formatted Export Test', subtitle='Synthetic marker data'}
+local meta = api.meta(select(2, api.rows()))
+assert(meta.subtitle == nil)
+assert(#meta.footerLines == 1 and meta.footerLines[1] == '4 of 4 items shown.')
 local xWithLength
 for _, show in ipairs({true, false}) do
   api.prefs.showLength = show
@@ -86,6 +88,8 @@ for _, show in ipairs({true, false}) do
   assert(start == show and position == not show and length == show)
   if show then xWithLength = nameX else assert(nameX < xWithLength) end
   api.text()
+  assert(not clipboard:find('Songs:', 1, true) and not clipboard:find('Net music:', 1, true)
+    and not clipboard:find('Gross:', 1, true))
   local first = clipboard:match('([^\n]+)')
   local _, tabs = first:gsub('\t', '')
   assert(tabs == (show and 3 or 2))
