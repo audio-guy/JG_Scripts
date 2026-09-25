@@ -19,7 +19,8 @@ reaper = {
   SetProjExtState = function(_, _, k, v) projExt[k] = v end,
   CountProjectMarkers = function() return 4, 3, 1 end,
   EnumProjectMarkers3 = function(_, i) return 1, table.unpack(items[i+1]) end,
-  EnumProjects = function() return {}, '' end,
+  EnumProjects = function() return 'project', '' end,
+  GetProjectStateChangeCount = function() return 1 end,
   CountTracks = function() return 0 end,
   format_timestr_pos = function(t, _, mode)
     if mode == -1 then return '01:00:00:12' end

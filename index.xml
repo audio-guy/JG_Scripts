@@ -41,6 +41,10 @@
       </version>
       <version name="1.2.0" author="Julius Gass">
         <changelog><![CDATA[Renamed to Marker/Region Formatted Export. Timeline time base is the new initial default. Project-specific Include/Exclude wildcard filters (#*, *.wav, *Intro*; semicolon-separated, case-sensitive, Exclude wins). Name filtering preserves song durations. Optional length column in PDF, preview and text; Position label when hidden. PDF position column adapts to time format.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/4851312/Tools/JG_Marker_Region_Formatted_Export.lua</source>
+      </version>
+      <version name="1.2.1" author="Julius Gass">
+        <changelog><![CDATA[Fix unresponsive window in large projects: share a cached project snapshot between lanes and preview, reuse derived rows until settings change, and refresh on project edits or tab changes. Faster marker-only project parsing and linear song-length calculation. Add Refresh for saved-file lane metadata. Keep settings isolated across project tabs and fix per-row Song toggle.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Marker_Region_Formatted_Export.lua</source>
       </version>
     </reapack>

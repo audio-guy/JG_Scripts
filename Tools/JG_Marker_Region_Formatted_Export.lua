@@ -1,6 +1,6 @@
 -- @description Marker/Region Formatted Export (PDF)
 -- @author JG
--- @version 1.2.0
+-- @version 1.2.1
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -61,6 +61,8 @@ local proj = {
 
 local state = { status = "Configure lanes, then Export." }
 local prefsDirty, projDirty = false, false
+local currentProject = r.EnumProjects(-1, "")
+local cache = {}
 
 -- ════════════════════════════════════════════════════════════════════════
 --  Persistence
@@ -119,23 +121,30 @@ local function serOverride(t)
 end
 
 local function loadProj()
-  local _, incNames = r.GetProjExtState(0, EXT, "includeNames")
-  local _, excNames = r.GetProjExtState(0, EXT, "excludeNames")
+  local _, incNames = r.GetProjExtState(currentProject or 0, EXT, "includeNames")
+  local _, excNames = r.GetProjExtState(currentProject or 0, EXT, "excludeNames")
   proj.includeNames, proj.excludeNames = incNames, excNames
-  local _, inc = r.GetProjExtState(0, EXT, "laneInc")
-  local _, sng = r.GetProjExtState(0, EXT, "laneSng")
-  local _, ovr = r.GetProjExtState(0, EXT, "override")
+  local _, inc = r.GetProjExtState(currentProject or 0, EXT, "laneInc")
+  local _, sng = r.GetProjExtState(currentProject or 0, EXT, "laneSng")
+  local _, ovr = r.GetProjExtState(currentProject or 0, EXT, "override")
   proj.laneInclude = deserMap(inc)
   proj.laneSong    = deserMap(sng)
   proj.override    = deserOverride(ovr)
 end
 
 local function saveProj()
-  r.SetProjExtState(0, EXT, "includeNames", proj.includeNames)
-  r.SetProjExtState(0, EXT, "excludeNames", proj.excludeNames)
-  r.SetProjExtState(0, EXT, "laneInc",  serMap(proj.laneInclude))
-  r.SetProjExtState(0, EXT, "laneSng",  serMap(proj.laneSong))
-  r.SetProjExtState(0, EXT, "override", serOverride(proj.override))
+  if currentProject and r.ValidatePtr and not r.ValidatePtr(currentProject, "ReaProject*") then return end
+  local before = r.GetProjectStateChangeCount(currentProject or 0)
+  r.SetProjExtState(currentProject or 0, EXT, "includeNames", proj.includeNames)
+  r.SetProjExtState(currentProject or 0, EXT, "excludeNames", proj.excludeNames)
+  r.SetProjExtState(currentProject or 0, EXT, "laneInc",  serMap(proj.laneInclude))
+  r.SetProjExtState(currentProject or 0, EXT, "laneSng",  serMap(proj.laneSong))
+  r.SetProjExtState(currentProject or 0, EXT, "override", serOverride(proj.override))
+  -- Our settings writes do not alter marker data. Acknowledge only if no
+  -- unrelated project edit has happened since the cached snapshot.
+  if cache.revision == before then
+    cache.revision = r.GetProjectStateChangeCount(currentProject or 0)
+  end
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -144,38 +153,29 @@ end
 --  heuristically. We try several known token names and field positions; if
 --  none match, callers fall back to grouping by colour.
 -- ════════════════════════════════════════════════════════════════════════
--- Get the raw project chunk. Native Reaper does NOT expose a function for
--- this — GetProjectStateChunk only exists with SWS installed — so we fall
--- back to reading the .rpp file directly (works for any saved project).
-local function getProjectChunk()
+-- Read only marker/ruler records; do not trim and copy every item/FX line.
+-- Without a project-chunk provider, use saved .rpp data for lanes, as before.
+local function getProjectChunkMarkerSection()
+  local lines = {}
+  local function collect(line)
+    local token = line:match("^%s*(%S+)")
+    if token == "MARKER" or token == "RULERLANE" then
+      lines[#lines + 1] = line:match("^%s*(.*)")
+    end
+  end
   if r.GetProjectStateChunk then
     local ok, chunk = r.GetProjectStateChunk(0, false)
-    if ok and chunk and chunk ~= "" then return chunk end
+    if ok and chunk and chunk ~= "" then
+      for line in chunk:gmatch("[^\r\n]+") do collect(line) end
+      return table.concat(lines, "\n")
+    end
   end
   local _, path = r.EnumProjects(-1, "")
   if path and path ~= "" then
     local f = io.open(path, "rb")
     if f then
-      local data = f:read("*a")
+      for line in f:lines() do collect(line) end
       f:close()
-      return data or ""
-    end
-  end
-  return ""
-end
-
-local function getProjectChunkMarkerSection()
-  local chunk = getProjectChunk()
-  if chunk == "" then return "" end
-  local lines = {}
-  for line in chunk:gmatch("[^\r\n]+") do
-    local t = line:match("^%s*(.-)%s*$")
-    if t:match("^MARKER")
-       or t:match("^LANE")
-       or t:match("LANE")
-       or t:match("^RULER")
-       or t:match("^<MARK") then
-      lines[#lines+1] = t
     end
   end
   return table.concat(lines, "\n")
@@ -279,7 +279,10 @@ local function enumItems()
     end
   end
   table.sort(items, function(a, b)
-    if a.pos == b.pos then return a.type == "m" end  -- markers before regions at same pos
+    if a.pos == b.pos then
+      if a.type ~= b.type then return a.type == "m" end
+      return a.idx < b.idx
+    end  -- markers before regions at same pos
     return a.pos < b.pos
   end)
   return items
@@ -347,6 +350,27 @@ local function groupLanes(items, laneNames)
     end)
   end
   return lanes, byLane
+end
+
+-- One project snapshot serves both the lane table and the export preview.
+local function projectSnapshot()
+  local active, path = r.EnumProjects(-1, "")
+  if active ~= currentProject then
+    if projDirty then saveProj(); projDirty = false end
+    currentProject = active
+    loadProj()
+    cache = {}
+  end
+  local revision = r.GetProjectStateChangeCount(0)
+  if not cache.items or cache.revision ~= revision or cache.path ~= path then
+    local items = enumItems()
+    local laneNames = attachLanes(items)
+    cache.items = items
+    cache.lanes, cache.byLane = groupLanes(items, laneNames)
+    cache.revision, cache.path = revision, path
+    cache.rows = nil
+  end
+  return cache
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -451,24 +475,19 @@ local function projectEnd()
 end
 
 local function computeLengths(items)
-  -- Regions: length = end - start
-  -- Marker-songs: until next song (marker or region) on the timeline; if none, until project end
-  local pe = projectEnd()
-  for i, it in ipairs(items) do
+  local pe, nextPos = projectEnd(), nil
+  for i = #items, 1, -1 do
+    local it = items[i]
+    it.len = nil
     if it.isSong then
       if it.type == "r" and it.endPos then
         it.len = it.endPos - it.pos
-      else
-        local nextPos
-        for j = i + 1, #items do
-          if items[j].isSong then nextPos = items[j].pos; break end
-        end
-        if nextPos then
-          it.len = nextPos - it.pos
-        elseif pe > it.pos then
-          it.len = pe - it.pos
-        end
+      elseif nextPos then
+        it.len = nextPos - it.pos
+      elseif pe > it.pos then
+        it.len = pe - it.pos
       end
+      nextPos = it.pos
     end
   end
 end
@@ -746,9 +765,20 @@ end
 --  Row building
 -- ════════════════════════════════════════════════════════════════════════
 local function buildRowsAndStats()
-  local items     = enumItems()
-  local laneNames = attachLanes(items)
-  local _, byLane = groupLanes(items, laneNames)
+  local snapshot = projectSnapshot()
+  -- Compare settings explicitly, including direct changes made by the UI.
+  -- Timeline formatting can change without a project undo/state change.
+  local values = {
+    prefs.timeMode, tostring(prefs.regionAsSong), prefs.prefix, prefs.blacklist,
+    proj.includeNames, proj.excludeNames, serMap(proj.laneInclude),
+    serMap(proj.laneSong), serOverride(proj.override),
+    fmtPos(0), fmtPos(3661.25),
+  }
+  local parts = {}
+  for i, value in ipairs(values) do parts[i] = #value .. ":" .. value end
+  local key = table.concat(parts)
+  if snapshot.rows and snapshot.rowKey == key then return snapshot.rows, snapshot.stats end
+  local items, byLane = snapshot.items, snapshot.byLane
   local blacklist = parseBlacklist(prefs.blacklist)
   classify(items, blacklist, byLane)
 
@@ -805,13 +835,15 @@ local function buildRowsAndStats()
     if first < last then brutto = last - first end
   end
 
-  return rows, {
+  local stats = {
     songCount = songCount,
     netMusic  = netMusic,
     brutto    = brutto,
     total     = #items,
     shown     = #visible,
   }
+  snapshot.rows, snapshot.stats, snapshot.rowKey = rows, stats, key
+  return rows, stats
 end
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -1038,8 +1070,8 @@ local function drawPreviewTable(rows)
         if row.guid then
           local chg, v = r.ImGui_Checkbox(ctx, "##psng"..i, row.isSong)
           if chg then
-            row.isSong = v
             togglePreviewOverride(row)
+            cache.rows = nil
           end
         else
           r.ImGui_TextDisabled(ctx, row.isSong and "S" or "·")
@@ -1090,6 +1122,8 @@ local function dumpChunk()
 end
 
 local function drawGUI()
+  -- Switch project settings before processing controls for the new tab.
+  projectSnapshot()
   r.ImGui_TextWrapped(ctx,
     "Exports markers and regions as a printable PDF. Songs are detected by " ..
     "the strategies below (OR-combined; blacklist acts as veto) and rendered " ..
@@ -1150,9 +1184,8 @@ local function drawGUI()
 
   -- Lane table — uses Reaper-7 named lanes if detectable in the project
   -- chunk, otherwise groups by (type + colour) as a fallback.
-  local items     = enumItems()
-  local laneNames = attachLanes(items)
-  local lanes, byLane = groupLanes(items, laneNames)
+  local snapshot = projectSnapshot()
+  local lanes, byLane = snapshot.lanes, snapshot.byLane
   if byLane then
     r.ImGui_Text(ctx, "Lanes (from project ruler lanes):")
   else
@@ -1183,6 +1216,11 @@ local function drawGUI()
     if r.ImGui_Button(ctx, "Copy as Text", 120, 28) then exportText() end
     r.ImGui_SameLine(ctx)
   end
+  if r.ImGui_Button(ctx, "Refresh", 80, 28) then
+    cache = {}
+    state.status = "Project data will be refreshed."
+  end
+  r.ImGui_SameLine(ctx)
   if r.ImGui_Button(ctx, "Debug: dump chunk", 150, 28) then dumpChunk() end
 
   r.ImGui_Spacing(ctx)
@@ -1207,5 +1245,5 @@ end
 -- Entry
 loadPrefs()
 loadProj()
-r.atexit(function() savePrefs(); saveProj() end)
+r.atexit(function() savePrefs(); if projDirty then saveProj() end end)
 loop()
