@@ -1,6 +1,6 @@
--- @description Concert Marker/Region Export (PDF)
+-- @description Marker/Region Formatted Export (PDF)
 -- @author JG
--- @version 1.1.2
+-- @version 1.2.0
 -- @about
 --   Exports the project's markers and regions as a printable PDF setlist.
 --   Each row shows the time-stamp, length (songs only) and the marker/region
@@ -14,8 +14,11 @@
 --     4. NOT on the blacklist (acts as veto — kills false positives like
 --        "Beifall, Applaus, Moderation, Ansage, …")
 --
---   Time base toggle: H:MM:SS (default) or bar.beat (respects the project's
---   measure start offset).
+--   Time base: Timeline (default, follows project ruler), H:MM:SS or bar.beat.
+--   Optional length column; without it Start is labelled Position.
+--   Project-specific Include/Exclude name filters: semicolon-separated wildcards.
+--   * matches any text; all other characters are literal. Case-sensitive.
+--   Empty Include accepts all; Exclude wins. Filters apply to original names.
 --
 --   Length is shown for songs only:
 --     - Region song: end - start
@@ -38,16 +41,19 @@ end
 -- ════════════════════════════════════════════════════════════════════════
 --  Config / state
 -- ════════════════════════════════════════════════════════════════════════
-local EXT = "JG_ConcertExport"
+local EXT = "JG_ConcertExport" -- Keep existing lane/song settings after rename.
 
 local prefs = {
-  timeMode     = "time",  -- "time" (H:MM:SS) or "bar" (bar.beat)
+  timeMode     = "timeline", -- "timeline", "time" (H:MM:SS), "bar" (bar.beat)
+  showLength   = true,
   regionAsSong = true,
   prefix       = "",
   blacklist    = "Beifall, Applaus, Moderation, Ansage, Pause, Intro, Outro, Soundcheck",
 }
 
 local proj = {
+  includeNames = "",
+  excludeNames = "",
   laneInclude = {},   -- [laneKey] = bool (default true)
   laneSong    = {},   -- [laneKey] = bool (default false)
   override    = {},   -- [markerGuid] = "s" force-song / "n" force-not-song
@@ -61,14 +67,18 @@ local prefsDirty, projDirty = false, false
 -- ════════════════════════════════════════════════════════════════════════
 local function loadPrefs()
   local v
-  v = r.GetExtState(EXT, "timeMode")     ; if v ~= "" then prefs.timeMode = v end
+  -- New key makes Timeline the initial default for existing installations too.
+  v = r.GetExtState(EXT, "formattedTimeMode")
+  if v == "timeline" or v == "time" or v == "bar" then prefs.timeMode = v end
+  v = r.GetExtState(EXT, "showLength"); if v ~= "" then prefs.showLength = (v == "1") end
   v = r.GetExtState(EXT, "regionAsSong") ; if v ~= "" then prefs.regionAsSong = (v == "1") end
   v = r.GetExtState(EXT, "prefix")       ; if v ~= "" then prefs.prefix = v end
   v = r.GetExtState(EXT, "blacklist")    ; if v ~= "" then prefs.blacklist = v end
 end
 
 local function savePrefs()
-  r.SetExtState(EXT, "timeMode",     prefs.timeMode, true)
+  r.SetExtState(EXT, "formattedTimeMode", prefs.timeMode, true)
+  r.SetExtState(EXT, "showLength", prefs.showLength and "1" or "0", true)
   r.SetExtState(EXT, "regionAsSong", prefs.regionAsSong and "1" or "0", true)
   r.SetExtState(EXT, "prefix",       prefs.prefix, true)
   r.SetExtState(EXT, "blacklist",    prefs.blacklist, true)
@@ -109,6 +119,9 @@ local function serOverride(t)
 end
 
 local function loadProj()
+  local _, incNames = r.GetProjExtState(0, EXT, "includeNames")
+  local _, excNames = r.GetProjExtState(0, EXT, "excludeNames")
+  proj.includeNames, proj.excludeNames = incNames, excNames
   local _, inc = r.GetProjExtState(0, EXT, "laneInc")
   local _, sng = r.GetProjExtState(0, EXT, "laneSng")
   local _, ovr = r.GetProjExtState(0, EXT, "override")
@@ -118,6 +131,8 @@ local function loadProj()
 end
 
 local function saveProj()
+  r.SetProjExtState(0, EXT, "includeNames", proj.includeNames)
+  r.SetProjExtState(0, EXT, "excludeNames", proj.excludeNames)
   r.SetProjExtState(0, EXT, "laneInc",  serMap(proj.laneInclude))
   r.SetProjExtState(0, EXT, "laneSng",  serMap(proj.laneSong))
   r.SetProjExtState(0, EXT, "override", serOverride(proj.override))
@@ -365,6 +380,33 @@ local function isBlacklisted(name, blacklist)
   return false
 end
 
+-- Whole-name wildcard matching. Escape Lua pattern syntax so punctuation
+-- such as dots, brackets, percent signs and question marks remains literal.
+local function namePatterns(value)
+  local patterns = {}
+  for part in value:gmatch("[^;]+") do
+    local glob = part:match("^%s*(.-)%s*$")
+    if glob ~= "" then
+      local pattern = glob:gsub("[%^%$%(%)%%%.%[%]%+%-%?]", "%%%0")
+      pattern = pattern:gsub("%*+", ".*")
+      patterns[#patterns + 1] = "^" .. pattern .. "$"
+    end
+  end
+  return patterns
+end
+
+local function matchesAny(name, patterns)
+  for _, pattern in ipairs(patterns) do
+    if name:match(pattern) then return true end
+  end
+  return false
+end
+
+local function includeName(name, includes, excludes)
+  return (#includes == 0 or matchesAny(name, includes))
+    and not matchesAny(name, excludes)
+end
+
 local function trimDisplayName(name, prefix)
   if prefix and prefix ~= "" and name:sub(1, #prefix) == prefix then
     name = name:sub(#prefix + 1)
@@ -454,6 +496,7 @@ local function fmtBarBeat(pos)
 end
 
 local function fmtPos(t)
+  if prefs.timeMode == "timeline" then return r.format_timestr_pos(t, "", -1) end
   if prefs.timeMode == "bar" then return fmtBarBeat(t) end
   return fmtHMS(t)
 end
@@ -615,9 +658,13 @@ local function buildPages(rows, meta)
 
   -- column right edges (right-aligned numerics)
   local X_NUM_R   = LM + 28
-  local X_START_R = LM + 110
-  local X_LEN_R   = LM + 185
-  local X_NAME_L  = LM + 200
+  local startWidth = 70
+  for _, row in ipairs(rows) do
+    startWidth = math.max(startWidth, textWidth(row.start or "", FS_BODY, row.isSong))
+  end
+  local X_START_R = X_NUM_R + 15 + startWidth
+  local X_LEN_R   = X_START_R + 75
+  local X_NAME_L  = (prefs.showLength and X_LEN_R or X_START_R) + 15
   local X_RIGHT   = PAGE_W - RM
 
   local function newPage()
@@ -644,8 +691,8 @@ local function buildPages(rows, meta)
 
   local function drawHeaderRow(yPos)
     pushRightAligned("#",     X_NUM_R,   yPos, true, FS_HEAD)
-    pushRightAligned("Start", X_START_R, yPos, true, FS_HEAD)
-    pushRightAligned("Länge", X_LEN_R,   yPos, true, FS_HEAD)
+    pushRightAligned(prefs.showLength and "Start" or "Position", X_START_R, yPos, true, FS_HEAD)
+    if prefs.showLength then pushRightAligned("Länge", X_LEN_R, yPos, true, FS_HEAD) end
     ops[#ops+1] = { x = X_NAME_L, y = yPos, text = "Name", bold = true, size = FS_HEAD }
   end
 
@@ -661,7 +708,7 @@ local function buildPages(rows, meta)
     local bold = row.isSong == true
     pushRightAligned(row.num,   X_NUM_R,   y, bold, FS_BODY)
     pushRightAligned(row.start, X_START_R, y, bold, FS_BODY)
-    pushRightAligned(row.len,   X_LEN_R,   y, bold, FS_BODY)
+    if prefs.showLength then pushRightAligned(row.len, X_LEN_R, y, bold, FS_BODY) end
     if row.name and row.name ~= "" then
       ops[#ops+1] = { x = X_NAME_L, y = y, text = row.name, bold = bold, size = FS_BODY }
     end
@@ -713,7 +760,14 @@ local function buildRowsAndStats()
     end
   end
 
+  -- Name filtering must not extend songs across hidden song boundaries.
   computeLengths(visible)
+  local includes, excludes = namePatterns(proj.includeNames), namePatterns(proj.excludeNames)
+  local filtered = {}
+  for _, it in ipairs(visible) do
+    if includeName(it.name, includes, excludes) then filtered[#filtered + 1] = it end
+  end
+  visible = filtered
 
   local songCount, netMusic = 0, 0
   local rows = {}
@@ -817,7 +871,7 @@ end
 local function makeMeta(stats)
   local m = {
     title    = projectName(),
-    subtitle = "Concert Setlist / Marker & Region Export",
+    subtitle = "Marker & Region Formatted Export",
     dateline = "Exported " .. os.date("%Y-%m-%d %H:%M"),
     footerLines = {
       string.format("Songs: %d   ·   Net music: %s   ·   Gross duration: %s",
@@ -855,8 +909,10 @@ local function exportText()
   end
   local lines = {}
   for _, row in ipairs(rows) do
-    lines[#lines+1] = string.format("%s\t%s\t%s\t%s",
-      row.num or "", row.start or "", row.len or "", row.name or "")
+    local columns = { row.num or "", row.start or "" }
+    if prefs.showLength then columns[#columns + 1] = row.len or "" end
+    columns[#columns + 1] = row.name or ""
+    lines[#lines+1] = table.concat(columns, "\t")
   end
   lines[#lines+1] = ""
   lines[#lines+1] = string.format("Project: %s   Exported %s",
@@ -869,7 +925,7 @@ end
 
 local function saveAsPdf()
   local default = defaultPdfPath()
-  local retval, path = r.JS_Dialog_BrowseForSaveFile("Save Concert PDF", projectDir(), default, "PDF (.pdf)\0*.pdf\0\0")
+  local retval, path = r.JS_Dialog_BrowseForSaveFile("Save Formatted Export PDF", projectDir(), default, "PDF (.pdf)\0*.pdf\0\0")
   if retval == 1 and path and path ~= "" then
     if not path:lower():match("%.pdf$") then path = path .. ".pdf" end
     exportPdf(path)
@@ -879,7 +935,7 @@ end
 -- ════════════════════════════════════════════════════════════════════════
 --  GUI
 -- ════════════════════════════════════════════════════════════════════════
-local ctx  = r.ImGui_CreateContext("JG Concert Marker/Region Export")
+local ctx  = r.ImGui_CreateContext("JG Marker/Region Formatted Export")
 local font = r.ImGui_CreateFont("sans-serif", 14)
 r.ImGui_Attach(ctx, font)
 
@@ -963,17 +1019,17 @@ end
 
 local function drawPreviewTable(rows)
   if #rows == 0 then
-    r.ImGui_TextDisabled(ctx, "(Nothing to preview — adjust lanes or save the project first.)")
+    r.ImGui_TextDisabled(ctx, "(Nothing to preview — adjust lanes or name filters.)")
     return
   end
   local childFlags = (r.ImGui_ChildFlags_Border and r.ImGui_ChildFlags_Border()) or 0
   if r.ImGui_BeginChild(ctx, "preview_scroll", 0, 260, childFlags) then
-    if r.ImGui_BeginTable(ctx, "preview", 5,
+    if r.ImGui_BeginTable(ctx, "preview", prefs.showLength and 5 or 4,
          r.ImGui_TableFlags_Borders() | r.ImGui_TableFlags_RowBg()) then
       r.ImGui_TableSetupColumn(ctx, "Song",  r.ImGui_TableColumnFlags_WidthFixed(), 46)
       r.ImGui_TableSetupColumn(ctx, "#",     r.ImGui_TableColumnFlags_WidthFixed(), 30)
-      r.ImGui_TableSetupColumn(ctx, "Start", r.ImGui_TableColumnFlags_WidthFixed(), 70)
-      r.ImGui_TableSetupColumn(ctx, "Länge", r.ImGui_TableColumnFlags_WidthFixed(), 60)
+      r.ImGui_TableSetupColumn(ctx, prefs.showLength and "Start" or "Position", r.ImGui_TableColumnFlags_WidthFixed(), 150)
+      if prefs.showLength then r.ImGui_TableSetupColumn(ctx, "Länge", r.ImGui_TableColumnFlags_WidthFixed(), 60) end
       r.ImGui_TableSetupColumn(ctx, "Name")
       r.ImGui_TableHeadersRow(ctx)
       for i, row in ipairs(rows) do
@@ -992,9 +1048,11 @@ local function drawPreviewTable(rows)
         r.ImGui_Text(ctx, row.num or "")
         r.ImGui_TableSetColumnIndex(ctx, 2)
         r.ImGui_Text(ctx, row.start or "")
-        r.ImGui_TableSetColumnIndex(ctx, 3)
-        r.ImGui_Text(ctx, row.len or "")
-        r.ImGui_TableSetColumnIndex(ctx, 4)
+        if prefs.showLength then
+          r.ImGui_TableSetColumnIndex(ctx, 3)
+          r.ImGui_Text(ctx, row.len or "")
+        end
+        r.ImGui_TableSetColumnIndex(ctx, prefs.showLength and 4 or 3)
         local name = row.name or ""
         if row.hasOverride then name = name .. "  *" end
         r.ImGui_Text(ctx, name)
@@ -1041,6 +1099,10 @@ local function drawGUI()
 
   -- Time mode
   r.ImGui_Text(ctx, "Time base:"); r.ImGui_SameLine(ctx)
+  if r.ImGui_RadioButton(ctx, "Timeline", prefs.timeMode == "timeline") then
+    prefs.timeMode = "timeline"; prefsDirty = true
+  end
+  r.ImGui_SameLine(ctx)
   if r.ImGui_RadioButton(ctx, "H:MM:SS", prefs.timeMode == "time") then
     if prefs.timeMode ~= "time" then prefs.timeMode = "time"; prefsDirty = true end
   end
@@ -1048,6 +1110,20 @@ local function drawGUI()
   if r.ImGui_RadioButton(ctx, "bar.beat", prefs.timeMode == "bar") then
     if prefs.timeMode ~= "bar" then prefs.timeMode = "bar"; prefsDirty = true end
   end
+
+  local chgLen, vLen = r.ImGui_Checkbox(ctx, "Show length", prefs.showLength)
+  if chgLen then prefs.showLength = vLen; prefsDirty = true end
+
+  r.ImGui_Text(ctx, "Name filters (markers and regions, within included lanes):")
+  for _, field in ipairs({ { "Include", "includeNames" }, { "Exclude", "excludeNames" } }) do
+    r.ImGui_Text(ctx, field[1]); r.ImGui_SameLine(ctx)
+    r.ImGui_PushItemWidth(ctx, -1)
+    local changed, value = r.ImGui_InputText(ctx, "##" .. field[2], proj[field[2]])
+    if changed then proj[field[2]] = value; projDirty = true end
+    r.ImGui_PopItemWidth(ctx)
+  end
+  r.ImGui_TextWrapped(ctx, "Examples: #* (prefix), *.wav (suffix), *Intro* (contains). Separate alternatives with ;. Case-sensitive. Empty Include = all; Exclude wins. Matches original names.")
+  r.ImGui_Separator(ctx)
 
   -- Region-as-song
   local chgR, vR = r.ImGui_Checkbox(ctx, "Regions count as songs", prefs.regionAsSong)
@@ -1116,7 +1192,7 @@ end
 local function loop()
   r.ImGui_PushFont(ctx, font, 14)
   r.ImGui_SetNextWindowSize(ctx, 760, 820, r.ImGui_Cond_FirstUseEver())
-  local visible, open = r.ImGui_Begin(ctx, "JG Concert Marker/Region Export", true)
+  local visible, open = r.ImGui_Begin(ctx, "JG Marker/Region Formatted Export", true)
   if visible then
     drawGUI()
     r.ImGui_End(ctx)
