@@ -1,6 +1,6 @@
 -- @description Create named tracks from clipboard (inc. I/O patch)
 -- @author Julius Gass
--- @version 1.1.0
+-- @version 1.1.1
 -- @about
 --   Creates named tracks from clipboard text (one track name per line).
 --   Automatically detects stereo pairs and lets you confirm via GUI.
@@ -35,6 +35,8 @@ local STEREO_PATTERNS = {
   { "^(.-)%s*_[Xx]$",                 "^(.-)%s*_[Yy]$"                      },
   { "^(.-)%s+1$",                     "^(.-)%s+2$"                          },
   { "^(.-)%s*_1$",                    "^(.-)%s*_2$"                         },
+  -- Fall back to attached L/R suffixes after a non-empty common name.
+  { "^(.+)[Ll]$",                     "^(.+)[Rr]$"                          },
 }
 
 -- ─── Helper: Set HW Output via Chunk ────────────────────────────────────────
