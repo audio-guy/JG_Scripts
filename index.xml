@@ -86,6 +86,10 @@
     </reapack>
 
     <reapack name="JG_Create_Tracks_From_Clipboard.lua" type="script" desc="JG Create Tracks From Clipboard">
+      <version name="1.1.2" author="Julius Gass">
+        <changelog><![CDATA[Fix track creation without detected stereo pairs by defining the creation function before calling it, with or without Virtual Soundcheck.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Create_Tracks_From_Clipboard.lua</source>
+      </version>
       <version name="1.1.1" author="Julius Gass">
         <changelog><![CDATA[Recognize consecutive matching names ending in L/R without a separator, such as GuitarL/GuitarR and Guitar 1L/Guitar 1R, case-insensitively.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Create_Tracks_From_Clipboard.lua</source>

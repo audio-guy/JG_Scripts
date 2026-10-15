@@ -1,6 +1,6 @@
 -- @description Create named tracks from clipboard (inc. I/O patch)
 -- @author Julius Gass
--- @version 1.1.1
+-- @version 1.1.2
 -- @about
 --   Creates named tracks from clipboard text (one track name per line).
 --   Automatically detects stereo pairs and lets you confirm via GUI.
@@ -130,79 +130,8 @@ while i <= #lines do
   end
 end
 
--- ─── Step 4: ReaImGui Stereo Confirmation (if pairs found) ──────────────────
-local ctx
-
-if #pairs_found > 0 then
-  ctx = reaper.ImGui_CreateContext("JG Create Tracks")
-
-  local FONT_SIZE = 15
-  local open      = true
-  local confirmed = false
-
-  local function loop()
-    if not open then
-      ctx = nil
-      if not confirmed then return end  -- user closed window = cancel
-      -- proceed to track creation (falls through after defer chain ends)
-      return
-    end
-
-    reaper.ImGui_SetNextWindowSize(ctx, 460, 300, reaper.ImGui_Cond_Once())
-    local visible, win_open = reaper.ImGui_Begin(ctx, "Stereo Pairs detected – confirm", true)
-
-    if visible then
-      reaper.ImGui_Text(ctx, "The following stereo pairs were detected.")
-      reaper.ImGui_Text(ctx, "Check which ones should be created as stereo:")
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_Spacing(ctx)
-
-      for pi, pair in ipairs(pairs_found) do
-        local rv, checked = reaper.ImGui_Checkbox(
-          ctx,
-          string.format('"%s"  (%s / %s)', pair.base_name, pair.name1, pair.name2),
-          pair.as_stereo
-        )
-        if rv then pairs_found[pi].as_stereo = checked end
-      end
-
-      reaper.ImGui_Spacing(ctx)
-      reaper.ImGui_Separator(ctx)
-      reaper.ImGui_Spacing(ctx)
-
-      if reaper.ImGui_Button(ctx, "Create Tracks", 120, 0) then
-        confirmed = true
-        open      = false
-      end
-      reaper.ImGui_SameLine(ctx)
-      if reaper.ImGui_Button(ctx, "Cancel", 80, 0) then
-        open = false
-      end
-
-      reaper.ImGui_End(ctx)
-    end
-
-    if not win_open then open = false end
-
-    if open then
-      reaper.defer(loop)
-    else
-      ctx = nil
-      if confirmed then
-        create_all_tracks()
-      end
-    end
-  end
-
-  reaper.defer(loop)
-
-else
-  -- No pairs found, create directly
-  create_all_tracks()
-end
-
--- ─── Step 5: Create Tracks ───────────────────────────────────────────────────
-function create_all_tracks()
+-- ─── Step 4: Create Tracks ───────────────────────────────────────────────────
+local function create_all_tracks()
   reaper.Undo_BeginBlock()
 
   if vs_mode then
@@ -298,4 +227,75 @@ function create_all_tracks()
     hw_start + 1, last_input
   )
   reaper.ShowMessageBox(summary, "JG Create Tracks", 0)
+end
+
+-- ─── Step 5: ReaImGui Stereo Confirmation (if pairs found) ──────────────────
+local ctx
+
+if #pairs_found > 0 then
+  ctx = reaper.ImGui_CreateContext("JG Create Tracks")
+
+  local FONT_SIZE = 15
+  local open      = true
+  local confirmed = false
+
+  local function loop()
+    if not open then
+      ctx = nil
+      if not confirmed then return end  -- user closed window = cancel
+      -- proceed to track creation (falls through after defer chain ends)
+      return
+    end
+
+    reaper.ImGui_SetNextWindowSize(ctx, 460, 300, reaper.ImGui_Cond_Once())
+    local visible, win_open = reaper.ImGui_Begin(ctx, "Stereo Pairs detected – confirm", true)
+
+    if visible then
+      reaper.ImGui_Text(ctx, "The following stereo pairs were detected.")
+      reaper.ImGui_Text(ctx, "Check which ones should be created as stereo:")
+      reaper.ImGui_Separator(ctx)
+      reaper.ImGui_Spacing(ctx)
+
+      for pi, pair in ipairs(pairs_found) do
+        local rv, checked = reaper.ImGui_Checkbox(
+          ctx,
+          string.format('"%s"  (%s / %s)', pair.base_name, pair.name1, pair.name2),
+          pair.as_stereo
+        )
+        if rv then pairs_found[pi].as_stereo = checked end
+      end
+
+      reaper.ImGui_Spacing(ctx)
+      reaper.ImGui_Separator(ctx)
+      reaper.ImGui_Spacing(ctx)
+
+      if reaper.ImGui_Button(ctx, "Create Tracks", 120, 0) then
+        confirmed = true
+        open      = false
+      end
+      reaper.ImGui_SameLine(ctx)
+      if reaper.ImGui_Button(ctx, "Cancel", 80, 0) then
+        open = false
+      end
+
+      reaper.ImGui_End(ctx)
+    end
+
+    if not win_open then open = false end
+
+    if open then
+      reaper.defer(loop)
+    else
+      ctx = nil
+      if confirmed then
+        create_all_tracks()
+      end
+    end
+  end
+
+  reaper.defer(loop)
+
+else
+  -- No pairs found, create directly
+  create_all_tracks()
 end
