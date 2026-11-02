@@ -23,8 +23,12 @@
 - Generated slot folder, marker and recording-tag names use `YYMMDD - HHMM Name`.
   Use the slot start; preserve user names in data.
 - Keep scheduling independent of window visibility and bound to the original project.
-- Every slot must create its own subfolder inside the selected recording folder.
-  No continuous/shared-folder mode. Stop/start can leave a gap.
+- Recording mode is explicit per project and visible in the main view. New projects
+  default to Continuous recording; existing v2 plans retain Separate slots.
+- Continuous recording includes all gaps from the first slot to the last end. Bands
+  are editable REAPER regions; later export uses current region bounds/names and
+  preserves original audio. Never infer recording mode from slot adjacency.
+- Separate slots stop/start into their own folders; transitions can leave a gap.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
 - Keep the Scheduler main view focused on status and the schedule. Put configuration

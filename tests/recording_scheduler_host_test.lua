@@ -74,8 +74,31 @@ end)
 test('write failure prevents start',function()
   local h,api,cfg,sources,commands=rig(); h.writable=function() return nil,'Disk unavailable' end; assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
 end)
+test('continuous host creates linked regions and captures original source positions',function()
+  local h,api,cfg,sources,commands=rig(); local st=C.new()
+  local a=slot('Band A'); a.finish=a.start+2
+  local b=slot('Band B'); b.start=a.start+4; b.finish=a.start+6
+  assert(C.apply(st,{a,b})); local regions={}
+  api.AddProjectMarker2=function(project,isregion,pos,finish,name)
+    assert(isregion); local id=#regions+1; regions[id]={pos=pos,finish=finish,name=name}; return id
+  end
+  api.EnumProjectMarkers3=function(_,i) local r=regions[i+1]; if not r then return 0 end; return 1,true,r.pos,r.finish,r.name,i+1,0 end
+  api.GetTrackName=function() return true,'Input' end; api.GetTrackGUID=function() return '{track}' end
+  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 100 or 6 end
+  api.GetMediaItemTakeInfo_Value=function(_,key) return key=='D_PLAYRATE' and 1 or 0 end
+  local e=E.new(st,h); e:watch(a.start-10); e:tick(a.start,0)
+  eq(#commands,1); eq(#regions,2); eq(regions[1].pos,100); eq(regions[2].pos,104)
+  eq(#st.captures,1); eq(st.captures[1].bands[2].region,2)
+  e:tick(a.start+3,3); eq(h:recording(),true)
+  local path=cfg.RECORD_PATH..'/input.wav'; write(path,'recorded audio'); sources[1]=path
+  e:tick(a.start+6,6); eq(h:recording(),false); eq(#commands,1)
+  eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed')
+  local c=assert(C.deserialize(C.serialize(st))).captures[1]
+  eq(c.files[1].position,100); eq(c.files[1].length,6); eq(c.files[1].offset,0)
+  eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
+end)
 test('full collapsed UI executes actual scheduled start and stop',function()
-  local h,api,cfg,sources,commands=rig(); local p=api.EnumProjects(-1); local st=C.new(); assert(C.apply(st,{slot('Loop test')}))
+  local h,api,cfg,sources,commands=rig(); local p=api.EnumProjects(-1); local st=C.new(); st.mode='separate'; assert(C.apply(st,{slot('Loop test')}))
   local now=st.slots[1].start-10; local queue,exits,ext={},{},{}
   local noop=function() end
   api.GetExtState=function(_,k) return ext[k] or '' end; api.SetExtState=function(_,k,v) ext[k]=v end; api.DeleteExtState=function(_,k) ext[k]=nil end
@@ -105,7 +128,7 @@ test('full collapsed UI executes actual scheduled start and stop',function()
 end)
 test('schedule, setup, activity and editor flows preserve data and native stacks',function()
   os.remove(root..'/session.rpp.jg-scheduler')
-  local h,api=rig(); local st=C.new(); assert(C.apply(st,{slot('Visible test')}))
+  local h,api=rig(); local st=C.new(); st.mode='separate'; assert(C.apply(st,{slot('Visible test')}))
   st.templates={{name='Template',start='19:30',finish='20:30',open=false,pre='0',post='0',enddays=0}}
   local ext,exits={},{}; local windows,disabled,ids,tables=0,0,0,0
   local clicked,typed,tab,queued=nil,{},nil,nil
@@ -189,6 +212,15 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     h.project_file=project_file
     frame('Save slot'); eq(#captured.state.slots,4)
     frame('Resume schedule'); eq(captured.state.enabled,true)
+    frame('Pause schedule'); frame(nil,nil,'Setup')
+    api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
+    frame(); eq(captured.state.mode,'continuous')
+    api.ImGui_Combo=api.ImGui_Checkbox
+    frame(nil,nil,'Schedule')
+    captured.state.captures={{id='ui',wall=0,position=0,folder=root,bands={{region=1,start=0,name='Band'}},files={}}}
+    api.EnumProjectMarkers3=function(_,i) if i>0 then return 0 end; return 1,true,0,10,'Band renamed',1,0 end
+    frame('Export band folders...'); frame()
+    assert(shown['Export now']); frame('Cancel')
     captured.state.enabled=true
     api.ImGui_Begin=function() windows=windows+1; return true,false end
     frame()

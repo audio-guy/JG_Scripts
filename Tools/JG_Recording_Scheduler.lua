@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.4.3
+-- @version 2.5.0
 -- @changelog
+--   Add explicit continuous recording, editable band regions and raw WAV band export.
 --   Remove templates from the slot editor; use Duplicate for similar slots.
 --   Allow deleting inactive slots without touching audio; remove redundant slot details.
 --   Require a saved project when saving or resuming a schedule.
@@ -17,11 +18,11 @@
 --   For unattended audio recordings and attended live capture. Requires ReaImGui 0.10+.
 --   Save the project first. Prepare audio inputs, normal record mode, no record length
 --   limit, and automatic retention of recorded files. Keep REAPER running and prevent sleep.
---   Each slot uses its own folder and a stop/start transition, which can leave a gap.
+--   Continuous recording includes pauses; Separate slots stop/start into individual folders.
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.4.3' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.0' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -91,7 +92,7 @@ function Core.conflict(slots)
   end
 end
 function Core.new()
-  return {slots={},log={},templates={},next_id=1,enabled=false,mode='separate',root='',revision=0}
+  return {slots={},log={},templates={},next_id=1,enabled=false,mode='continuous',root='',revision=0,captures={}}
 end
 function Core.add_log(state,now,message)
   state.log[#state.log+1]={time=now,message=message}; state.revision=state.revision+1
@@ -119,24 +120,29 @@ end
 
 -- A versioned, escaped data format; never execute stored project data as Lua.
 function Core.serialize(st)
-  local out={row('JG_RECORDING_SCHEDULER',2),row('P','separate',st.root,st.next_id,st.revision,st.paused and '1' or '0')}
+  local out={row('JG_RECORDING_SCHEDULER',3),row('P',st.mode,st.root,st.next_id,st.revision,st.paused and '1' or '0')}
   for _,s in ipairs(st.slots) do out[#out+1]=row('S',s.id,s.name,s.start,s.finish or '',s.pre,s.post,s.status,s.note,s.actual_start or '',s.actual_end or '',s.folder or '') end
+  for _,c in ipairs(st.captures or {}) do
+    out[#out+1]=row('C',c.id,c.wall,c.position,c.folder,c.error or '')
+    for _,b in ipairs(c.bands) do out[#out+1]=row('B',c.id,b.region,b.start,b.name) end
+    for _,f in ipairs(c.files) do out[#out+1]=row('F',c.id,f.track,f.name,f.path,f.position,f.offset,f.length) end
+  end
   for _,e in ipairs(st.log) do out[#out+1]=row('L',e.time,e.message) end
   for _,t in ipairs(st.templates) do out[#out+1]=row('T',t.name,t.start,t.finish,t.open and '1' or '0',t.pre,t.post,t.enddays or 0) end
   return table.concat(out,'\n')..'\n'
 end
 function Core.deserialize(text)
   if not text or text=='' then return Core.new() end
-  local st=Core.new(); local first=true; local ids={}
-  local statuses={Scheduled=true,Recording=true,Starting=true,Completed=true,Partial=true,Stopped=true,Missed=true,Failed=true,Interrupted=true}
+  local st=Core.new(); local first=true; local ids={}; local version; local captures={}
+  local statuses={Scheduled=true,Recording=true,Starting=true,Completed=true,Partial=true,Stopped=true,Missed=true,Failed=true,Interrupted=true,['In session']=true,Captured=true}
   for line in text:gmatch('[^\n]+') do
     local f=fields(line)
     if first then
-      if f[1]~='JG_RECORDING_SCHEDULER' or f[2]~='2' then return nil,'Unsupported or damaged schedule data.' end
-      first=false
+      if f[1]~='JG_RECORDING_SCHEDULER' or (f[2]~='2' and f[2]~='3') then return nil,'Unsupported or damaged schedule data.' end
+      version=tonumber(f[2]); first=false
     elseif f[1]=='P' then
       if f[2]~='separate' and f[2]~='continuous' then return nil,'Invalid recording mode in saved plan.' end
-      st.mode,st.root,st.next_id,st.revision='separate',f[3],tonumber(f[4]),tonumber(f[5])
+      st.mode,st.root,st.next_id,st.revision=version==3 and f[2] or 'separate',f[3],tonumber(f[4]),tonumber(f[5])
       st.paused=f[6]=='1'
       if not finite(st.next_id) or st.next_id<1 or not finite(st.revision) then return nil,'Invalid plan metadata.' end
     elseif f[1]=='S' then
@@ -149,6 +155,18 @@ function Core.deserialize(text)
       end
       ids[s.id]=true; st.next_id=math.max(st.next_id,s.id+1)
       st.slots[#st.slots+1]=s
+    elseif f[1]=='C' and (#f==5 or #f==6) then
+      if captures[f[2]] or not finite(tonumber(f[3])) or not finite(tonumber(f[4])) then return nil,'Invalid capture metadata.' end
+      local c={id=f[2],wall=tonumber(f[3]),position=tonumber(f[4]),folder=f[5],error=f[6] or '',bands={},files={}}
+      captures[c.id]=c; st.captures[#st.captures+1]=c
+    elseif f[1]=='B' and #f==5 then
+      local c=captures[f[2]]
+      if not c or not finite(tonumber(f[3])) or not finite(tonumber(f[4])) then return nil,'Invalid band region.' end
+      c.bands[#c.bands+1]={region=tonumber(f[3]),start=tonumber(f[4]),name=f[5]}
+    elseif f[1]=='F' and #f==8 then
+      local c=captures[f[2]]
+      if not c or not finite(tonumber(f[6])) or not finite(tonumber(f[7])) or not finite(tonumber(f[8])) then return nil,'Invalid captured file.' end
+      c.files[#c.files+1]={track=f[3],name=f[4],path=f[5],position=tonumber(f[6]),offset=tonumber(f[7]),length=tonumber(f[8])}
     elseif f[1]=='L' and tonumber(f[2]) then st.log[#st.log+1]={time=tonumber(f[2]),message=f[3]}
     elseif f[1]=='T' and #f==8 then
       st.templates[#st.templates+1]={name=f[2],start=f[3],finish=f[4],open=f[5]=='1',pre=f[6],post=f[7],enddays=tonumber(f[8]) or 0}
@@ -156,7 +174,7 @@ function Core.deserialize(text)
   end
   if first or Core.conflict(st.slots) then return nil,'Empty or overlapping saved plan.' end
   for _,s in ipairs(st.slots) do
-    if s.status=='Recording' or s.status=='Starting' then s.status='Interrupted'; s.note='Previous scheduler session ended. Inspect the audio files before continuing.' end
+    if s.status=='Recording' or s.status=='Starting' or s.status=='In session' or s.status=='Captured' then s.status='Interrupted'; s.note='Previous scheduler session ended. Inspect the audio files before continuing.' end
   end
   return st
 end
@@ -197,17 +215,62 @@ function Engine:watch(now)
   if pending then self:log(now,'Watching scheduled slots.') end
 end
 function Engine:finalize(now,requested,reason)
+  self:update_session(now)
   local ok,detail=self.host:verify()
+  if self.capture and self.host.capture_files then
+    self.capture.error=not ok and detail or ''
+    self.capture.files=self.host:capture_files()
+    if self.host.finish_regions then self.host:finish_regions(self.capture,now) end
+  end
   for _,s in ipairs(self.session) do
-    s.actual_end=s.actual_end or now
-    if not ok then s.status='Failed'; s.note=detail
-    elseif s==self.active and requested~='Completed' then s.status=requested; s.note=reason
-    elseif s.note~='' then s.status='Partial'
+    local begin,ending=Core.bounds(s)
+    s.actual_end=self.continuous and math.min(now,ending or now) or now
+    if not s.actual_start or (self.continuous and now<=begin) then s.status='Interrupted'; s.note='Recording stopped before this slot began.'; s.actual_end=nil
+    elseif not ok then s.status='Failed'; s.note=detail
+    elseif requested~='Completed' and (not ending or now<ending) then s.status=requested; s.note=reason
+    elseif s.note~='' or (self.continuous and self.active.note~='') then s.status='Partial'; s.note=s.note~='' and s.note or self.active.note
     else s.status='Completed'; s.note='Recorded files found on every expected track. Audio content not checked.' end
     self:log(now,Core.folder(s)..': '..s.status..'. '..(s.note or ''))
   end
   for _,path in ipairs(self.host.result_files or {}) do self:log(now,'Recorded file: '..path) end
-  self.host:restore(); self.session={}; self.active=nil
+  self.host:restore(); self.session={}; self.active=nil; self.capture=nil; self.continuous=false
+end
+function Engine:update_session(now)
+  if not self.continuous then return end
+  for _,s in ipairs(self.session) do
+    local begin,ending=Core.bounds(s)
+    local status=now<begin and 'In session' or (ending and now>=ending and 'Captured' or 'Recording')
+    if now>=begin and not s.actual_start then s.actual_start=math.max(begin,self.active.actual_start) end
+    if s.status~=status then s.status=status; self.state.revision=self.state.revision+1 end
+  end
+end
+function Engine:start_session(s,now)
+  local continuous=self.state.mode=='continuous'
+  local members={s}; local transport=s
+  if continuous then
+    members={}
+    for _,v in ipairs(self.state.slots) do if v.status=='Scheduled' and v.start>=s.start then members[#members+1]=v end end
+    table.sort(members,function(a,b) return a.start<b.start end)
+    transport=copy(s); transport.name='Continuous recording'; transport.finish=members[#members].finish
+  end
+  local ok,err=self.host:preflight(false)
+  if ok then ok,err=self.host:start(transport,self.state.root,continuous,now) end
+  if not ok or not self.host:recording() then
+    s.status='Failed'; s.note=err or 'REAPER did not enter recording.'
+    self.host:restore(); self:disable(now,Core.folder(s)..': '..s.note); return
+  end
+  self.active=transport; self.session=members; self.continuous=continuous
+  transport.actual_start=now
+  if now-s.start>2 then transport.note='Recording started '..(now-s.start)..' seconds late.' end
+  for _,v in ipairs(members) do v.folder=transport.folder; v.status=continuous and 'In session' or 'Recording' end
+  if continuous then
+    if self.host.begin_capture then
+      self.capture=self.host:begin_capture(members,now)
+      self.state.captures[#self.state.captures+1]=self.capture
+    end
+    self:update_session(now)
+  else s.actual_start=now; self.host:marker(s) end
+  self:log(now,transport.name..': Recording to '..transport.folder)
 end
 function Engine:stop(now,reason)
   self.state.enabled=false
@@ -220,6 +283,11 @@ function Engine:stop(now,reason)
 end
 function Engine:extend(now,seconds)
   if not self.active or not self.active.finish then return nil,'This recording has no scheduled end.' end
+  if self.continuous then
+    self.active.finish=self.active.finish+seconds
+    self:log(now,'Continuous recording extended; band regions are unchanged.')
+    return true
+  end
   local proposed=copy(self.active); proposed.finish=proposed.finish+seconds; proposed.status='Scheduled'
   local check={proposed}
   for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then check[#check+1]=s end end
@@ -230,7 +298,10 @@ function Engine:extend(now,seconds)
 end
 function Engine:tick(now,mono)
   if not self.host:valid() then
-    if self.active then self.active.status='Interrupted'; self.active.note='Target project closed.'; self:log(now,self.active.note) end
+    if self.active then
+      for _,s in ipairs(self.session) do s.status='Interrupted'; s.note='Target project closed.' end
+      self:log(now,'Target project closed.')
+    end
     self.state.enabled=false; return false
   end
   if self.last_wall and math.abs((now-self.last_wall)-(mono-self.last_mono))>3 then
@@ -240,6 +311,7 @@ function Engine:tick(now,mono)
   self.last_wall,self.last_mono=now,mono
   if self.state.enabled and not self.host:selected() then self:disable(now,'Target project is no longer selected. Future starts disabled; active recording keeps its end.') end
   if self.active then
+    self:update_session(now)
     local s=self.active
     if self.host.paused and self.host:paused() then
       self:stop(now,'Recording was paused. Inspect the recorded duration.'); return true
@@ -269,17 +341,7 @@ function Engine:tick(now,mono)
         if now-begin>5 then
           s.status='Missed'; s.note='Start missed by more than 5 seconds. Duplicate/edit to reschedule.'; self:log(now,Core.folder(s)..': '..s.note)
         else
-          local ok,err=self.host:preflight(false)
-          if ok then ok,err=self.host:start(s,self.state.root) end
-          if not ok or not self.host:recording() then
-            s.status='Failed'; s.note=err or 'REAPER did not enter recording.'
-            self.host:restore(); self:disable(now,Core.folder(s)..': '..s.note)
-          else
-            s.status='Recording'; s.actual_start=now
-            if now-begin>2 then s.note='Recording started '..(now-begin)..' seconds late.' end
-            self.active=s; self.session={s}; self.host:marker(s)
-            self:log(now,Core.folder(s)..': Recording to '..s.folder)
-          end
+          self:start_session(s,now)
         end
         break
       end
@@ -344,6 +406,7 @@ function Host:writable(path)
   return true
 end
 function Host:prepare(state)
+  if state.mode=='continuous' then return self:writable(self:root_path(state.root)) end
   -- Exercise every destination before arming; repeat the check at the actual start.
   for _,s in ipairs(state.slots) do
     if s.status=='Scheduled' then
@@ -382,9 +445,10 @@ function Host:source_map()
   end
   return files,lengths
 end
-function Host:start(slot,root)
+function Host:start(slot,root,continuous,now)
   local r=self.r
-  local path=join(self:root_path(root),Core.folder(slot))
+  local folder=continuous and (stamp(slot.start)..' Originals '..self.r.genGuid():gsub('[^%w]','')) or Core.folder(slot)
+  local path=join(self:root_path(root),folder)
   local ok,err=self:writable(path); if not ok then return nil,err end
   local _,oldpath=r.GetSetProjectInfo_String(self.project,'RECORD_PATH','',false)
   local _,tag=r.GetSetProjectInfo_String(self.project,'RECTAG','',false)
@@ -395,6 +459,7 @@ function Host:start(slot,root)
   r.GetSetProjectInfo_String(self.project,'RECTAG',self.saved.newtag,true)
   -- Append after existing content. Never seek to a wall-clock position over user media.
   local position=math.max(r.GetCursorPositionEx(self.project),r.GetProjectLength(self.project))
+  self.capture_position=position
   r.SetEditCurPos2(self.project,position,false,false)
   self.owns_transport=true
   r.Main_OnCommandEx(1013,0,self.project)
@@ -433,6 +498,202 @@ function Host:restore()
   if not self:recording() then self.owns_transport=false end
 end
 
+-- Raw WAV export: copy sample bytes, bypassing all project mix/FX state.
+-- Supports PCM/float RIFF and RF64, including files split by REAPER during capture.
+local Wave={}
+function Wave.inspect(path)
+  local f,err=io.open(path,'rb'); if not f then return nil,'Cannot read source: '..path..' ('..tostring(err)..')' end
+  local ok,result=pcall(function()
+    local size=assert(f:seek('end')); f:seek('set',0)
+    local header=assert(f:read(12),'Empty audio file')
+    local kind=header:sub(1,4)
+    assert((kind=='RIFF' or kind=='RF64') and header:sub(9,12)=='WAVE','Export requires PCM/float WAV or RF64 recordings')
+    local info={path=path}; local data64
+    while f:seek()+8<=size do
+      local chunk=f:read(8); local tag=chunk:sub(1,4); local n=string.unpack('<I4',chunk,5); local pos=f:seek()
+      if tag=='ds64' then
+        assert(n>=28 and n<=1048576,'Invalid RF64 size table')
+        local ds=assert(f:read(28)); data64=string.unpack('<I8',ds,9)
+      elseif tag=='fmt ' then
+        assert(n>=16 and n<=4096,'Invalid WAV format')
+        info.format=assert(f:read(n)); local code,ch,rate,byte_rate,align,bits=string.unpack('<I2I2I4I4I2I2',info.format)
+        if code==65534 then
+          assert(n>=40,'Invalid extensible WAV format'); code=string.unpack('<I2',info.format,25)
+          assert(info.format:sub(27,40)=='\0\0\0\0\16\0\128\0\0\170\0\56\155\113','Unsupported WAV subtype')
+        end
+        assert((code==1 or (code==3 and (bits==32 or bits==64))) and ch>0 and rate>0 and bits>0 and bits%8==0 and align==ch*(bits//8) and byte_rate==rate*align,'Unsupported WAV sample format')
+        info.rate,info.align,info.code=rate,align,code
+      elseif tag=='data' then
+        if n==0xffffffff then n=assert(data64,'Missing RF64 data size') end
+        assert(pos+n<=size,'Truncated WAV source')
+        info.data,info.bytes=pos,n
+        if info.format then break end
+      end
+      assert(pos+n<=size,'Truncated WAV chunk'); f:seek('set',pos+n+n%2)
+    end
+    assert(info.format and info.data and info.bytes%info.align==0,'Missing or incomplete WAV audio data')
+    info.samples=info.bytes//info.align
+    return info
+  end)
+  f:close(); if not ok then return nil,tostring(result) end; return result
+end
+local function sample(t,rate) return math.floor(t*rate+0.5) end
+function Wave.plan(files,begin,ending,cache)
+  assert(ending>begin,'Region must have a positive length')
+  cache=cache or {}; local tracks={}; local order={}; local common_rate
+  for _,v in ipairs(files) do
+    if v.position<ending and v.position+v.length>begin then
+      local info=cache[v.path]
+      if not info then local err; info,err=Wave.inspect(v.path); assert(info,err); cache[v.path]=info end
+      common_rate=common_rate or info.rate; assert(common_rate==info.rate,'Captured tracks use different sample rates')
+      local t=tracks[v.track]
+      if not t then t={name=v.name,parts={},format=info.format,rate=info.rate,align=info.align,code=info.code}; tracks[v.track]=t; order[#order+1]=v.track end
+      assert(t.format==info.format,'Audio format changes within a captured track')
+      local first=math.max(sample(begin,info.rate),sample(v.position,info.rate))
+      local last=math.min(sample(ending,info.rate),sample(v.position+v.length,info.rate))
+      local offset=sample(v.offset,info.rate)+first-sample(v.position,info.rate)
+      assert(offset>=0 and offset+last-first<=info.samples,'Region exceeds available source audio')
+      t.parts[#t.parts+1]={path=v.path,offset=info.data+offset*info.align,first=first,last=last}
+    end
+  end
+  assert(#order>0,'No captured audio covers this region')
+  -- Every originally recorded track must cover the whole selected region.
+  for _,v in ipairs(files) do assert(tracks[v.track],'Region has no audio on track: '..v.name) end
+  table.sort(order)
+  local jobs={}
+  for _,id in ipairs(order) do
+    local t=tracks[id]; table.sort(t.parts,function(a,b) return a.first<b.first end)
+    local cursor=sample(begin,t.rate)
+    for _,part in ipairs(t.parts) do assert(part.first==cursor,'Gap or overlapping source audio on track: '..t.name); cursor=part.last end
+    assert(cursor==sample(ending,t.rate),'Region exceeds recorded audio on track: '..t.name)
+    t.samples=cursor-sample(begin,t.rate); t.bytes=t.samples*t.align; jobs[#jobs+1]=t
+  end
+  return jobs
+end
+function Wave.header(job)
+  local fmt='fmt '..string.pack('<I4',#job.format)..job.format..(#job.format%2==1 and '\0' or '')
+  local fact=job.code==3 and ('fact'..string.pack('<I4I4',4,math.min(job.samples,0xffffffff))) or ''
+  local size=4+#fmt+#fact+8+job.bytes+job.bytes%2
+  if size<=0xffffffff then return 'RIFF'..string.pack('<I4',size)..'WAVE'..fmt..fact..'data'..string.pack('<I4',job.bytes) end
+  return 'RF64'..string.pack('<I4',0xffffffff)..'WAVEds64'..string.pack('<I4I8I8I8I4',28,size+36,job.bytes,job.samples,0)..fmt..fact..'data'..string.pack('<I4',0xffffffff)
+end
+function Wave.writer(jobs)
+  local task={done=0,total=#jobs,handles={}}
+  function task:close()
+    for _,f in ipairs(self.handles) do pcall(function() f:close() end) end; self.handles={}
+    if self.partial then os.remove(self.partial); self.partial=nil end
+  end
+  task.thread=coroutine.create(function()
+    for _,job in ipairs(jobs) do
+      local existing=io.open(job.path,'rb'); if existing then existing:close(); error('Export already exists: '..job.path) end
+      task.partial=job.path..'.partial'
+      local out=assert(io.open(task.partial,'wb')); task.handles={out}; assert(out:write(Wave.header(job)))
+      for _,part in ipairs(job.parts) do
+        local input=assert(io.open(part.path,'rb')); task.handles={out,input}; assert(input:seek('set',part.offset))
+        local remaining=(part.last-part.first)*job.align
+        while remaining>0 do
+          local n=math.min(remaining,1048576); local bytes=assert(input:read(n),'Unexpected end of source audio')
+          assert(#bytes==n,'Source audio changed during export'); assert(out:write(bytes)); remaining=remaining-n
+          coroutine.yield()
+        end
+        input:close(); task.handles={out}
+      end
+      if job.bytes%2==1 then assert(out:write('\0')) end
+      assert(out:close()); task.handles={}; assert(os.rename(task.partial,job.path)); task.partial=nil
+      task.done=task.done+1
+    end
+  end)
+  return task
+end
+
+function Host:begin_capture(slots,now)
+  local c={id=self.r.genGuid(),wall=now,position=self.capture_position,folder=self.saved.newpath,bands={},files={}}
+  for _,s in ipairs(slots) do
+    local begin,ending=Core.bounds(s)
+    local pos=c.position+math.max(0,begin-now)
+    local finish=ending and c.position+ending-now or pos+1
+    local id=self.r.AddProjectMarker2(self.project,true,pos,finish,s.name,-1,0)
+    assert(id>=0,'Could not create a band region. Recording stopped for review.')
+    c.bands[#c.bands+1]={region=id,start=begin,name=s.name,open=not ending}
+  end
+  return c
+end
+function Host:regions()
+  local regions={}; local i=0
+  while true do
+    local ok,isregion,pos,finish,name,id=self.r.EnumProjectMarkers3(self.project,i)
+    if ok==0 then break end
+    if isregion then regions[id]={position=pos,finish=finish,name=name} end
+    i=i+1
+  end
+  return regions
+end
+function Host:finish_regions(c,now)
+  local regions=self:regions()
+  for _,b in ipairs(c.bands) do if b.open then
+    local region=regions[b.region]
+    if region then self.r.SetProjectMarker3(self.project,b.region,true,region.position,math.max(region.position+0.001,c.position+now-c.wall),region.name,0) end
+  end end
+end
+function Host:capture_files()
+  local r=self.r; local result={}; local paths={}
+  for _,path in ipairs(self.result_files or {}) do paths[path]=true end
+  for _,track in ipairs(self.expected) do
+    local _,name=r.GetTrackName(track,''); local guid=r.GetTrackGUID(track)
+    for i=0,r.CountTrackMediaItems(track)-1 do
+      local item=r.GetTrackMediaItem(track,i)
+      for j=0,r.CountTakes(item)-1 do
+        local take=r.GetTake(item,j)
+        if take and not r.TakeIsMIDI(take) then
+          local path=r.GetMediaSourceFileName(r.GetMediaItemTake_Source(take),'')
+          if paths[path] then
+            if r.GetMediaItemTakeInfo_Value(take,'D_PLAYRATE')~=1 then return {} end
+            local directory=self:project_file():match('^(.*)[/\\]')
+            local stored_path=directory and path:sub(1,#directory+1)==directory..'/' and path:sub(#directory+2) or path
+            result[#result+1]={track=guid,name=name,path=stored_path,position=r.GetMediaItemInfo_Value(item,'D_POSITION'),length=r.GetMediaItemInfo_Value(item,'D_LENGTH'),offset=r.GetMediaItemTakeInfo_Value(take,'D_STARTOFFS')}
+          end
+        end
+      end
+    end
+  end
+  return result
+end
+function Host:export_plan(state,selection,base)
+  if self:recording() or self.r.GetPlayStateEx(self.project)~=0 then return nil,'Stop the transport before exporting.' end
+  local ok,result=pcall(function()
+    local regions=self:regions(); local jobs={}; local cache={}; local folders={}
+    base=base or join(self:root_path(state.root),'Band exports '..os.date('%y%m%d - %H%M%S')..' '..self.r.genGuid():gsub('[^%w]',''))
+    local bands=0
+    for _,c in ipairs(state.captures) do
+      local sources={}
+      for _,f in ipairs(c.files) do
+        local v=copy(f)
+        if not absolute(v.path) then v.path=join(self:project_file():match('^(.*)[/\\]') or '',v.path) end
+        sources[#sources+1]=v
+      end
+      for _,b in ipairs(c.bands) do if not selection or selection[c.id..':'..b.region] then
+        assert(not c.error or c.error=='','Recording verification failed: '..(c.error or ''))
+        assert(#sources>0,'This capture has no verified source map. Inspect the recording before exporting.')
+        local region=regions[b.region]
+        assert(region,'A band region was deleted. Restore it before exporting (region '..b.region..').')
+        local name=trim(region.name)~='' and region.name or b.name
+        local folder=join(base,Core.folder{name=name,start=math.floor(c.wall+region.position-c.position)})
+        if folders[folder] then folder=folder..' - Region '..b.region end
+        assert(not folders[folder],'Duplicate band folder'); folders[folder]=true
+        local tracks=Wave.plan(sources,region.position,region.finish,cache)
+        for index,job in ipairs(tracks) do
+          local filename=Core.folder{name=job.name,start=0}:sub(#stamp(0)+2)
+          job.folder=folder; job.path=join(folder,string.format('%02d %s.wav',index,filename)); jobs[#jobs+1]=job
+        end
+        bands=bands+1
+      end end
+    end
+    assert(#jobs>0,'No continuous recordings are available to export.')
+    return {jobs=jobs,bands=bands,path=base}
+  end)
+  if not ok then return nil,tostring(result) end; return result
+end
+
 local function run(r)
   if not r.ImGui_CreateContext then r.ShowMessageBox('Install ReaImGui via ReaPack, then run Recording Scheduler again.','Recording Scheduler',0); return end
   local project=r.EnumProjects(-1,''); local host=Host.new(r,project)
@@ -460,6 +721,7 @@ local function run(r)
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
   local editing=nil; local error=loaderr or ''
   local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
+  local export_preview,export_task=nil,nil
   local undo=nil
   local function save()
     if not host:valid() then return end
@@ -481,8 +743,8 @@ local function run(r)
   end
   local function snapshot() undo=Core.serialize(state) end
   local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
-  local function editable() return not engine.active end
-  local function setup_editable() return not state.enabled and not engine.active end
+  local function editable() return not engine.active and not export_task end
+  local function setup_editable() return not state.enabled and not engine.active and not export_task end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
   local function edit(s,duplicate)
     editing=not duplicate and s.id or nil
@@ -494,7 +756,7 @@ local function run(r)
     local file=host:project_file(); if file=='' then error='Save the project first.'; return end
     local path=file..'.recording-log.tsv'; local f,err=io.open(path,'wb')
     if not f then error='Cannot export activity log: '..tostring(err); return end
-    local out={row('Recording Scheduler activity log'),row('Project',file),row('Slot','Planned start','Planned end','Actual start','Actual end','Status','Folder','Details')}
+    local out={row('Recording Scheduler activity log'),row('Project',file),row('Recording mode',state.mode=='continuous' and 'Continuous recording' or 'Separate slots'),row('Slot','Planned start','Planned end','Actual start','Actual end','Status','Folder','Details')}
     for _,s in ipairs(state.slots) do out[#out+1]=row(s.name,stamp(s.start),stamp(s.finish),stamp(s.actual_start),stamp(s.actual_end),s.status,s.folder,s.note) end
     out[#out+1]=row('Time','Event')
     for _,e in ipairs(state.log) do out[#out+1]=row(os.date('%y%m%d - %H%M%S',e.time),e.message) end
@@ -569,7 +831,7 @@ local function run(r)
     r.ImGui_Separator(ctx)
     if preview then
       local begin,ending=Core.bounds(preview)
-      text('Folder: '..Core.folder(preview))
+      text((state.mode=='continuous' and 'Band export: ' or 'Folder: ')..Core.folder(preview))
       muted(ending and duration(ending-begin) or 'Manual stop')
     end
     if r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) then commit_form(now) end
@@ -578,6 +840,14 @@ local function run(r)
     if editor_open and error~='' then text(error) end
   end
   local function draw_setup()
+    text('Recording mode')
+    r.ImGui_BeginDisabled(ctx,not setup_editable())
+    local mode_changed,mode=r.ImGui_Combo(ctx,'##mode',state.mode=='continuous' and 0 or 1,'Continuous recording\0Separate slots\0')
+    if mode_changed then state.mode=mode==0 and 'continuous' or 'separate'; state.revision=state.revision+1 end
+    r.ImGui_EndDisabled(ctx)
+    text(state.mode=='continuous' and 'Records from the first slot to the last end, including every pause. Bands become editable regions.' or 'Starts and stops each slot in its own folder. Adjacent slots can have an audio gap.')
+    if state.mode=='continuous' then muted('Band export requires PCM/float WAV or RF64 recordings.') end
+    r.ImGui_Separator(ctx)
     text('Recording destination')
     r.ImGui_BeginDisabled(ctx,not setup_editable())
     r.ImGui_SetNextItemWidth(ctx,-1)
@@ -593,17 +863,62 @@ local function run(r)
     r.ImGui_Separator(ctx)
     muted('Subfolders: YYMMDD - HHMM Name')
     r.ImGui_EndDisabled(ctx)
-    if not setup_editable() then muted('Pause scheduling to change the recording folder.') end
+    if not setup_editable() then muted('Pause scheduling to change mode or destination. Finish active recording/export first.') end
     if r.ImGui_CollapsingHeader(ctx,'Recording help') then
-      text('Separate slots stop/start and can leave a gap. Use a single slot for continuous capture.')
+      text('Continuous recording includes all pauses, even overnight. Pause schedule does not shorten an active continuous recording; Stop recording ends it.')
       text('Use normal recording mode with no limit/count-in, and keep recorded files without a confirmation dialog. Check inputs, levels and disk space.')
       text('Keep REAPER running. Scheduling follows the system clock and is not sample accurate. A late start may be missed.')
-      text('Plans are saved with this project and in a recovery sidecar. After reopening, explicitly enable the schedule again.')
+      text('Plans are saved with this project and in a recovery sidecar. Future slots resume after reopening unless explicitly paused.')
       text('Completed means new files were found on every expected track. Check the audio before treating a recording as verified.')
     end
   end
   local function draw_schedule(now)
+    if export_task then
+      text('Exporting '..export_task.done..' / '..export_task.total..' files')
+      if r.ImGui_Button(ctx,'Cancel export') then export_task:close(); export_task=nil; error='Export cancelled. Completed export files were retained.' end
+      return
+    end
+    if export_preview then
+      text('Export band folders')
+      text(export_preview.path)
+      local regions=host:regions()
+      if r.ImGui_BeginTable(ctx,'Export regions',2,r.ImGui_TableFlags_ScrollY(),0,200) then
+        for _,c in ipairs(state.captures) do for _,b in ipairs(c.bands) do
+          local key=c.id..':'..b.region; local region=regions[b.region]
+          r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
+          local changed,value=r.ImGui_Checkbox(ctx,(region and region.name or b.name..' (missing region)')..'##'..key,export_preview.selection[key])
+          if changed then export_preview.selection[key]=value end
+          r.ImGui_TableNextColumn(ctx)
+          text(region and (duration(region.position)..' - '..duration(region.finish)) or 'Restore region or deselect')
+        end end
+        r.ImGui_EndTable(ctx)
+      end
+      muted('Current region boundaries. Original sample data; no track FX, gain or normalization. Originals stay unchanged.')
+      if r.ImGui_Button(ctx,'Export now') then
+        -- Re-read regions on confirmation; never export stale preview boundaries.
+        local plan,problem=host:export_plan(state,export_preview.selection,export_preview.path)
+        if plan then
+          local ok=true
+          for _,job in ipairs(plan.jobs) do local writable,err=host:writable(job.folder); if not writable then ok=false; error=err; break end end
+          if ok then export_task=Wave.writer(plan.jobs); export_task.path=plan.path; export_preview=nil; error='' end
+        else error=problem end
+      end
+      r.ImGui_SameLine(ctx)
+      if r.ImGui_Button(ctx,'Cancel') then export_preview=nil end
+      if error~='' then text(error) end
+      return
+    end
     if editor_open and editable() then draw_editor(now); return end
+    if #state.captures>0 then
+      r.ImGui_BeginDisabled(ctx,not setup_editable())
+      if r.ImGui_Button(ctx,'Export band folders...') then
+        export_preview={selection={},path=join(host:root_path(state.root),'Band exports '..os.date('%y%m%d - %H%M%S')..' '..r.genGuid():gsub('[^%w]',''))}
+        for _,c in ipairs(state.captures) do for _,b in ipairs(c.bands) do export_preview.selection[c.id..':'..b.region]=true end end
+        error=''
+      end
+      r.ImGui_EndDisabled(ctx)
+      if not setup_editable() then muted('Pause scheduling and finish recording before exporting.') end
+    end
     r.ImGui_BeginDisabled(ctx,not editable())
     if r.ImGui_Button(ctx,'Add slot',110,0) then start_editor() end
     r.ImGui_SameLine(ctx)
@@ -713,6 +1028,11 @@ local function run(r)
         elseif nextslot then
           text('Next: '..nextslot.name)
           muted(stamp(nextslot.start)..'  /  in '..duration(Core.bounds(nextslot)-now))
+          if state.mode=='continuous' then
+            local last=nextslot
+            for _,v in ipairs(state.slots) do if v.status=='Scheduled' and v.start>last.start then last=v end end
+            muted(last.finish and ('Through '..stamp(last.finish)..' / all pauses included') or 'Through manual stop / all pauses included')
+          end
         else muted('No upcoming slots') end
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
@@ -722,7 +1042,7 @@ local function run(r)
         if state.enabled then
           if r.ImGui_Button(ctx,'Pause schedule',-1,0) then pause_requested=true; state.paused=true; engine:disable(now,'Schedule paused. Active recording keeps its planned end.') end
         elseif nextslot then
-          r.ImGui_BeginDisabled(ctx,loaderr~=nil or host.storage_error~=nil)
+          r.ImGui_BeginDisabled(ctx,loaderr~=nil or host.storage_error~=nil or export_task~=nil or export_preview~=nil)
           if r.ImGui_Button(ctx,'Resume schedule',-1,0) then
             if host:project_file()=='' then error='Save the REAPER project first (Cmd/Ctrl+S), then resume the schedule.'
             else pause_requested=false; state.paused=false; state.revision=state.revision+1; error=''; engine:watch(now) end
@@ -731,6 +1051,7 @@ local function run(r)
         end
         r.ImGui_EndTable(ctx)
       end
+      muted(state.mode=='continuous' and 'Continuous recording / pauses included' or 'Separate slots / individual folders')
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       -- One persistent message area across all views, including the editor.
@@ -766,6 +1087,7 @@ local function run(r)
     return not quit
   end
   local function cleanup()
+    if export_task then export_task:close(); export_task=nil end
     if host:valid() then
       if engine.active then engine:stop(os.time(),'Scheduler terminated. Inspect recorded files.') end
       if host.owns_transport and host:recording() then host:stop() end
@@ -777,6 +1099,18 @@ local function run(r)
   local function loop()
     local ok,err=xpcall(function()
       local now=os.time()
+      if export_task then
+        if not host:valid() or r.GetPlayStateEx(project)~=0 then
+          export_task:close(); export_task=nil; error='Export cancelled because the project or transport changed.'
+        else
+          local ok,problem=coroutine.resume(export_task.thread)
+          if not ok then export_task:close(); export_task=nil; error='Export failed: '..tostring(problem)
+          elseif coroutine.status(export_task.thread)=='dead' then
+            error='Band folders exported: '..export_task.path; export_task:close(); export_task=nil
+            Core.add_log(state,now,error)
+          end
+        end
+      end
       if not engine:tick(now,r.time_precise()) then return end
       if now~=last_check then ready,readiness=host:preflight(true); readiness=readiness or ''; last_check=now end
       save()
@@ -787,5 +1121,5 @@ local function run(r)
   loop()
 end
 
-if ...=='__test' then return {Core=Core,Engine=Engine,Host=Host,run=run} end
+if ...=='__test' then return {Core=Core,Engine=Engine,Host=Host,run=run,Wave=Wave} end
 run(reaper)
