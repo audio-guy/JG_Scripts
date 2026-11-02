@@ -1,4 +1,4 @@
-# Recording Scheduler 2.3
+# Recording Scheduler 2.3.1
 
 ## Purpose
 
@@ -50,6 +50,10 @@ in individual audio filenames, add `$rectag` to REAPER's recording filename patt
 The script does not change global naming preferences.
 
 ## Interface
+
+The window title shows the running version (for example, Recording Scheduler v2.3.1).
+Restart the script after updating to load the new version. This identifies the
+loaded version; it does not check online for updates.
 
 The UI is designed for an experienced operator. The compact header shows state and
 next/active slot; one message area displays concrete issues across every view.

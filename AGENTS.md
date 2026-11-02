@@ -33,6 +33,8 @@
 - No occurrences/repetition, pre/post-roll controls or mandatory setup checklist.
   Use direct recording start/end times and duplicate slots when needed.
 - Offer a native folder picker for the recording destination.
+- Always show the running Scheduler version in the window title. Keep it in sync
+  with the script's ReaPack version; preserve the ImGui window ID across updates.
 
 - Treat the Scheduler as an expert operator tool: no onboarding paragraphs in the
   main view, no admin/guest split, concise labels and a single actionable message

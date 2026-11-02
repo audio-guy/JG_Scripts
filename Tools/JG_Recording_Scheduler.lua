@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.3.0
+-- @version 2.3.1
 -- @changelog
+--   Display the running version in the window title while preserving window settings.
 --   Compact operator UI; remove onboarding copy and show actionable errors once.
 --   Simplify slots to direct start/end times; remove repetition and confirmation checklists.
 --   Always record each slot into its own YYMMDD - HHMM Name subfolder.
@@ -14,6 +15,8 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
+local VERSION = '2.3.1' -- Keep in sync with the ReaPack @version above.
+local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
 local function trim(s) return (s or ''):match('^%s*(.-)%s*$') end
@@ -698,7 +701,7 @@ local function run(r)
     r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_ItemSpacing(),10,6)
     r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_CellPadding(),8,4)
     r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_FrameRounding(),4)
-    local visible,open=r.ImGui_Begin(ctx,'Recording Scheduler',true)
+    local visible,open=r.ImGui_Begin(ctx,WINDOW_TITLE,true)
     local quit=false
     if visible then
       r.ImGui_PushFont(ctx,nil,16)
