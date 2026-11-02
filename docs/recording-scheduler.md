@@ -1,4 +1,4 @@
-# Recording Scheduler 2.0
+# Recording Scheduler 2.1
 
 ## Purpose and product decisions
 
@@ -12,13 +12,33 @@ Only the filesystem-derived name replaces invalid filename characters.
 ## Installation
 
 Load `Tools/JG_Recording_Scheduler.lua` through REAPER's Actions list. Requires
-ReaImGui (available through ReaPack). SWS is not required by this version.
+ReaImGui 0.10 or newer (available through ReaPack). SWS is not required by this version.
 Close any running older scheduler before launching the new one. Version 1 kept its
 plan only in memory, so there is no saved v1 plan to import.
 
 The development installation can point existing action paths to this file with a
 symbolic link. The repository file is the maintained source. This version is not
 added to the public ReaPack index until a release is explicitly requested.
+
+## Interface
+
+The main view opens on **Schedule**. A persistent header shows recording state,
+the next slot/countdown and the enable/stop controls. Project, armed-track count
+and recording mode remain visible across all three views.
+
+- **Schedule:** a scrollable table with fixed headers and separate date, start,
+  end, length and status columns. Select a row for Edit, Duplicate and Delete.
+  Completed/stopped history is hidden initially; failed/missed/partial entries
+  stay visible. Expand Selected slot details for the recording window and folder.
+- **Add slot / Edit selected:** opens an inline editor in place of the table.
+  Dates and times are paired; repetition, margins and templates are collapsed
+  until needed. Save returns to the plan; Cancel discards the draft. Switching
+  views retains an unfinished draft and prevents enabling until it is resolved.
+- **Setup:** destination, recording mode and four explicit operator checks.
+- **Activity:** all events, newest first, with a log export button.
+
+The interface uses 16 px text, consistent control spacing and keyboard navigation.
+Scheduling remains independent of the selected view and window visibility.
 
 ## Before enabling
 
@@ -73,7 +93,7 @@ of the edit cursor and existing project end, avoiding wall-clock seeks into medi
 
 - Dates: `YYMMDD` (also accepts `YYYY-MM-DD`). Times: `HH:MM` or `HHMM`.
 - End date is explicit, including overnight recordings. End must follow start.
-- **No end time** is an explicit option and requires a manual stop.
+- **Open-ended recording** is an explicit option and requires a manual stop.
 - Pre-roll/post-roll: whole seconds from 0 to 3600.
 - Repetition: 1–100 occurrences, daily or weekly at the same local time.
 - Ambiguous/nonexistent daylight-saving times are rejected, including repetitions.
@@ -82,8 +102,8 @@ of the edit cursor and existing project end, avoiding wall-clock seeks into medi
 - Disable future starts before changing the plan. Active slots cannot be deleted or
   edited. Their end can be extended by five minutes if no future slot conflicts.
 - One-level undo restores the last add/edit/delete/template change.
-- **Disable future starts** leaves an active recording's stop time intact.
-- **Stop recording and disable schedule** ends the owned recording immediately.
+- **Disable schedule** (or **Disable future starts** while recording) leaves an active recording's stop time intact.
+- **Stop recording** ends the owned recording immediately.
 - Closing an active/enabled scheduler asks explicitly to stop and close or keep running.
   Terminating the script also attempts to stop only its own recording and restore settings.
 
@@ -115,9 +135,9 @@ Completion does **not** verify signal, audible content, full duration, absence o
 underruns or file integrity. Pre-existing files and unrelated new files outside the
 slot folder are excluded from verification. In continuous mode verification covers
 the whole transport session, not an individual file per slot. The activity log lists
-confirmed new file paths. The UI shows the latest 12 events; export includes all.
+confirmed new file paths. The Activity view and export include all events.
 
-**Export activity log** writes `<project>.rpp.recording-log.tsv`, replacing a previous
+**Export log** writes `<project>.rpp.recording-log.tsv`, replacing a previous
 export for that project. The versioned text format escapes tabs/newlines/percent
 characters in user content rather than executing stored data.
 

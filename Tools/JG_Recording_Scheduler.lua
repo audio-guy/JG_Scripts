@@ -1,12 +1,13 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.0.0
+-- @version 2.1.0
 -- @changelog
+--   Streamlined Schedule, Setup and Activity views with an on-demand slot editor.
 --   Project-bound scheduling, persistent plans, explicit activation and verified results.
 --   Strict time validation, pre/post-roll, repeat/duplicate/templates and activity export.
 --   Dedicated slot folders named YYMMDD - HHMM Name; continuous live recording mode.
 -- @about
---   For unattended audio recordings and attended live capture. Requires ReaImGui.
+--   For unattended audio recordings and attended live capture. Requires ReaImGui 0.10+.
 --   Save the project first. Prepare audio inputs, normal record mode, no record length
 --   limit, and automatic retention of recorded files. Keep REAPER running and prevent sleep.
 --   Separate mode uses a stop/start between slots; continuous mode keeps adjacent slots
@@ -444,10 +445,10 @@ local function run(r)
   end
   state=state or Core.new()
   local engine=Engine.new(state,host)
-  local ctx=r.ImGui_CreateContext('Recording Scheduler')
+  local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
   local editing=nil; local error=loaderr or ''; local count='1'; local weekly=false; local template_index=1
-  local close_requested=false; local show_history=true; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
+  local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
   local undo=nil
   local function save()
     if not host:valid() then return end
@@ -471,7 +472,6 @@ local function run(r)
   local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; count='1'; error='' end
   local function editable() return not state.enabled and not engine.active end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
-  local function input(label,key) local changed,value=r.ImGui_InputText(ctx,label,form[key]); if changed then form[key]=value end end
   local function edit(s,duplicate)
     editing=not duplicate and s.id or nil
     form={date=os.date('%y%m%d',s.start),start=os.date('%H:%M',s.start),enddate=os.date('%y%m%d',s.finish or s.start),finish=s.finish and os.date('%H:%M',s.finish) or '',name=s.name,open=not s.finish,pre=tostring(s.pre),post=tostring(s.post)}
@@ -488,147 +488,321 @@ local function run(r)
     local ok=f:write(table.concat(out,'\n')..'\n'); local closed=f:close()
     error=ok and closed and ('Log exported: '..path) or 'Could not finish writing the activity log.'
   end
-  local function draw(now)
-    r.ImGui_SetNextWindowSize(ctx,1000,740,r.ImGui_Cond_FirstUseEver())
-    if close_requested then r.ImGui_SetNextWindowCollapsed(ctx,false) end
-    local visible,open=r.ImGui_Begin(ctx,'Recording Scheduler',true)
-    local quit=false
-    if visible then
-      text('RECORDING READINESS')
-      text('Project: '..r.GetProjectName(project,''))
-      text('Armed audio tracks: '..#host:tracks())
-      text('Recording root: '..host:root_path(state.root))
-      if engine.active then
-        text('RECORDING: '..Core.folder(engine.active))
-        local _,ending=Core.bounds(engine.active)
-        text(ending and ('Remaining: '..math.max(0,ending-now)..' s') or 'No end time. Stop manually.')
-        text('Folder: '..engine.active.folder)
-        if r.ImGui_Button(ctx,'Stop recording and disable schedule') then engine:stop(now) end
-        if engine.active and engine.active.finish then
-          r.ImGui_SameLine(ctx)
-          if r.ImGui_Button(ctx,'Extend end by 5 minutes') then local ok,err=engine:extend(now,300); if not ok then error=err end end
+  local view='Schedule'
+  local editor_open=false
+  local selected_id=nil
+  local setup_checks={false,false,false,false}
+  local function duration(seconds)
+    seconds=math.max(0,math.floor(seconds))
+    return string.format('%02d:%02d:%02d',seconds//3600,(seconds%3600)//60,seconds%60)
+  end
+  local function muted(message) r.ImGui_TextColored(ctx,0xAEB6C2FF,tostring(message)) end
+  local function status(label)
+    local colors={Recording=0xFF8585FF,Enabled=0x93D9B3FF,Completed=0x93D9B3FF,Ready=0x93D9B3FF,
+      Failed=0xFF8585FF,Missed=0xF1C777FF,Partial=0xF1C777FF,Interrupted=0xF1C777FF}
+    r.ImGui_TextColored(ctx,colors[label] or 0xD5DBE3FF,label)
+  end
+  local function field(label,key)
+    text(label)
+    r.ImGui_SetNextItemWidth(ctx,-1)
+    local changed,value=r.ImGui_InputText(ctx,'##'..key,form[key])
+    if changed then
+      -- Keep same-day dates in sync until the user deliberately chooses another end date.
+      if key=='date' and form.enddate==form.date then form.enddate=value end
+      form[key]=value
+    end
+  end
+  local function start_editor(s,duplicate)
+    error=''
+    if s then edit(s,duplicate) else clear_form(); form.date=os.date('%y%m%d'); form.enddate=form.date end
+    editor_open=true
+  end
+  local function commit_form(now)
+    local s,err=Core.make(form)
+    if s then
+      local additions; additions,err=Core.repeat_slots(s,editing and 1 or tonumber(count),weekly and 7 or 1)
+      if additions then
+        if Core.bounds(additions[1])<=now then err='Start including pre-roll must be in the future.'
+        else
+          snapshot()
+          local ok; ok,err=Core.apply(state,additions,editing)
+          if ok then selected_id=state.next_id-#additions; clear_form(); editor_open=false end
         end
-      else text(ready and 'Ready to enable' or ('Not ready: '..readiness)) end
-      if state.enabled then
-        text('Schedule ENABLED')
-        if r.ImGui_Button(ctx,'Disable future starts') then engine:disable(now) end
-      elseif not engine.active then
-        r.ImGui_BeginDisabled(ctx,not ready or loaderr~=nil)
-        if r.ImGui_Button(ctx,'Enable schedule') then save(); local ok,err=engine:enable(now); if not ok then error=err end end
-        r.ImGui_EndDisabled(ctx)
       end
-      text('Keep REAPER running and the computer awake. Closing this window stops scheduler-owned recording.')
-      r.ImGui_Separator(ctx)
-      if editable() and r.ImGui_CollapsingHeader(ctx,'Plan setup and slot editor',r.ImGui_TreeNodeFlags_DefaultOpen()) then
-      r.ImGui_BeginDisabled(ctx,not editable())
-      local changed,value=r.ImGui_Checkbox(ctx,'Setup checked: normal record mode, no recording limit/count-in, auto-save recorded files, enough disk space, sleep disabled',host.confirmed)
-      if changed then host.confirmed=value; last_check=0 end
-      changed,value=r.ImGui_InputText(ctx,'Recording root (blank = project recording path)',state.root)
-      if changed then state.root=value; state.revision=state.revision+1 end
-      local continuous=state.mode=='continuous'
-      changed,value=r.ImGui_Checkbox(ctx,'Continuous live recording across adjacent slots',continuous)
-      if changed then state.mode=value and 'continuous' or 'separate'; state.revision=state.revision+1 end
-      text(continuous and 'Adjacent slots share the FIRST slot folder and continuous audio files. Each slot gets a marker.' or 'Each slot has its own folder. Stop/start between slots can leave a gap; use continuous mode when every moment matters.')
-      r.ImGui_Separator(ctx)
-      text(editing and 'EDIT SLOT' or 'ADD SLOT')
-      input('Name','name'); input('Date (YYMMDD)','date'); input('Start (HH:MM)','start')
-      changed,value=r.ImGui_Checkbox(ctx,'No end time (manual stop)',form.open); if changed then form.open=value end
-      r.ImGui_BeginDisabled(ctx,form.open)
-      input('End date (YYMMDD)','enddate'); input('End (HH:MM)','finish')
-      r.ImGui_EndDisabled(ctx)
-      input('Pre-roll (seconds)','pre'); input('Post-roll (seconds)','post')
+    end
+    error=err or ''
+  end
+  local function draw_editor(now)
+    text(editing and 'Edit slot' or 'New slot')
+    field('Name','name')
+    if r.ImGui_BeginTable(ctx,'Slot times',2,r.ImGui_TableFlags_SizingStretchSame()) then
+      r.ImGui_TableNextRow(ctx)
+      r.ImGui_TableNextColumn(ctx); field('Start date  /  YYMMDD','date')
+      r.ImGui_TableNextColumn(ctx); field('Start time  /  HH:MM','start')
+      r.ImGui_TableNextRow(ctx)
+      r.ImGui_TableNextColumn(ctx)
+      r.ImGui_BeginDisabled(ctx,form.open); field('End date  /  YYMMDD','enddate'); r.ImGui_EndDisabled(ctx)
+      r.ImGui_TableNextColumn(ctx)
+      r.ImGui_BeginDisabled(ctx,form.open); field('End time  /  HH:MM','finish'); r.ImGui_EndDisabled(ctx)
+      r.ImGui_EndTable(ctx)
+    end
+    local changed,value=r.ImGui_Checkbox(ctx,'Open-ended recording (manual stop)',form.open)
+    if changed then form.open=value end
+    if r.ImGui_CollapsingHeader(ctx,'Pre-roll, post-roll and repetition') then
+      if r.ImGui_BeginTable(ctx,'Slot options',2,r.ImGui_TableFlags_SizingStretchSame()) then
+        r.ImGui_TableNextRow(ctx)
+        r.ImGui_TableNextColumn(ctx); field('Pre-roll  /  seconds','pre')
+        r.ImGui_TableNextColumn(ctx); field('Post-roll  /  seconds','post')
+        r.ImGui_EndTable(ctx)
+      end
       if not editing then
+        r.ImGui_SetNextItemWidth(ctx,120)
         changed,value=r.ImGui_InputText(ctx,'Occurrences (1-100)',count); if changed then count=value end
-        changed,value=r.ImGui_Checkbox(ctx,'Weekly (otherwise daily)',weekly); if changed then weekly=value end
+        changed,value=r.ImGui_Checkbox(ctx,'Repeat weekly instead of daily',weekly); if changed then weekly=value end
       end
-      local preview=Core.make(form)
-      if preview then
-        local begin,ending=Core.bounds(preview)
-        text('Folder: '..Core.folder(preview))
-        text('Recording window: '..stamp(begin)..' to '..(ending and stamp(ending) or 'manual stop'))
-      end
-      if r.ImGui_Button(ctx,editing and 'Save changes' or 'Add to schedule') then
-        local s,err=Core.make(form)
-        if s then
-          local additions; additions,err=Core.repeat_slots(s,editing and 1 or tonumber(count),weekly and 7 or 1)
-          if additions then
-            if Core.bounds(additions[1])<=now then err='Start including pre-roll must be in the future.'
-            else snapshot(); local ok; ok,err=Core.apply(state,additions,editing); if ok then clear_form() end end
+    end
+    if r.ImGui_CollapsingHeader(ctx,'Templates') then
+      if #state.templates>0 then
+        local names={}; for _,t in ipairs(state.templates) do names[#names+1]=t.name end
+        local choice
+        changed,choice=r.ImGui_Combo(ctx,'Saved template',template_index-1,table.concat(names,'\0')..'\0')
+        if changed then template_index=choice+1 end
+        if r.ImGui_Button(ctx,'Apply template') then
+          local t=state.templates[template_index] or state.templates[1]
+          for _,key in ipairs({'name','start','finish','open','pre','post'}) do form[key]=t[key] end
+          local date=Core.datetime(form.date,'12:00')
+          if date then
+            local d=os.date('*t',date)
+            form.enddate=os.date('%y%m%d',os.time{year=d.year,month=d.month,day=d.day+t.enddays,hour=12})
           end
         end
-        error=err or ''
-      end
-      r.ImGui_SameLine(ctx)
-      if r.ImGui_Button(ctx,'Cancel edit / Clear') then clear_form() end
-      r.ImGui_SameLine(ctx)
-      if r.ImGui_Button(ctx,'Undo last plan change') and undo then
-        local old=Core.deserialize(undo)
-        if old then local revision=state.revision; state.slots=old.slots; state.next_id=old.next_id; state.templates=old.templates; state.revision=revision+1; undo=nil; clear_form() end
-      end
-      if r.ImGui_Button(ctx,'Save as template') then
+      else muted('No templates saved in this project.') end
+      if r.ImGui_Button(ctx,'Save form as template') then
         local s,err=Core.make(form)
         if not s then error=err else
           snapshot()
           local a=os.date('*t',s.start); local b=os.date('*t',s.finish or s.start)
           local days=math.floor((os.time{year=b.year,month=b.month,day=b.day,hour=12}-os.time{year=a.year,month=a.month,day=a.day,hour=12})/86400+0.5)
-          local template=copy(form); template.enddays=days; state.templates[#state.templates+1]=template; state.revision=state.revision+1; error='Template saved in this project.'
+          local template=copy(form); template.enddays=days
+          state.templates[#state.templates+1]=template; state.revision=state.revision+1; error='Template saved.'
         end
       end
-      if #state.templates>0 then
-        local names={}; for _,t in ipairs(state.templates) do names[#names+1]=t.name end
-        local selected; changed,selected=r.ImGui_Combo(ctx,'Template',template_index-1,table.concat(names,'\0')..'\0')
-        if changed then template_index=selected+1 end
-        if r.ImGui_Button(ctx,'Load template') then
-          local t=state.templates[template_index] or state.templates[1]
-          for _,k in ipairs({'name','start','finish','open','pre','post'}) do form[k]=t[k] end
-          local date=Core.datetime(form.date,'12:00')
-          if date then local d=os.date('*t',date); form.enddate=os.date('%y%m%d',os.time{year=d.year,month=d.month,day=d.day+t.enddays,hour=12}) end
-          editing=nil
-        end
-      end
-      r.ImGui_EndDisabled(ctx)
-      end
-      if error~='' then text(error) end
-      r.ImGui_Separator(ctx)
-      text('SCHEDULE')
-      changed,value=r.ImGui_Checkbox(ctx,'Show completed and failed slots',show_history); if changed then show_history=value end
-      if #state.slots==0 then text('No slots yet. Add a name and start/end time, then enable the schedule.') end
-      if r.ImGui_BeginTable(ctx,'Schedule',5,r.ImGui_TableFlags_Borders()|r.ImGui_TableFlags_RowBg()|r.ImGui_TableFlags_Resizable()) then
-        for _,label in ipairs({'Slot','Start / End','Status','Details','Actions'}) do r.ImGui_TableSetupColumn(ctx,label) end
-        r.ImGui_TableHeadersRow(ctx)
-        local remove_id
-        for _,s in ipairs(state.slots) do
-          if show_history or s.status=='Scheduled' or s.status=='Recording' then
-            r.ImGui_PushID(ctx,s.id); r.ImGui_TableNextRow(ctx)
-            r.ImGui_TableNextColumn(ctx); text(s.name)
-            r.ImGui_TableNextColumn(ctx); text(stamp(s.start)); text(s.finish and stamp(s.finish) or 'Manual stop')
-            r.ImGui_TableNextColumn(ctx); text(s.status)
-            if s.status=='Scheduled' then text('In '..math.max(0,Core.bounds(s)-now)..' s') end
-            r.ImGui_TableNextColumn(ctx); text(s.note~='' and s.note or Core.folder(s))
-            r.ImGui_TableNextColumn(ctx); r.ImGui_BeginDisabled(ctx,not editable())
-            if s.status=='Scheduled' and r.ImGui_Button(ctx,'Edit') then edit(s,false) end
-            if r.ImGui_Button(ctx,'Duplicate') then edit(s,true) end
-            if s.status=='Scheduled' and r.ImGui_Button(ctx,'Delete') then remove_id=s.id end
-            r.ImGui_EndDisabled(ctx); r.ImGui_PopID(ctx)
-          end
-        end
-        r.ImGui_EndTable(ctx)
-        if remove_id then snapshot(); for i,s in ipairs(state.slots) do if s.id==remove_id then table.remove(state.slots,i); break end end; state.revision=state.revision+1; clear_form() end
-      end
-      r.ImGui_Separator(ctx)
-      text('ACTIVITY LOG')
-      if r.ImGui_Button(ctx,'Export activity log') then export() end
-      text('Completed confirms new files on all expected tracks, not signal quality. Partial / Failed require inspection.')
-      for i=#state.log,math.max(1,#state.log-11),-1 do text(os.date('%H:%M:%S',state.log[i].time)..'  '..state.log[i].message) end
-      if close_requested then
-        r.ImGui_Separator(ctx)
-        text('Close scheduler? Future starts will be disabled. Any scheduler-owned recording will be stopped and checked. The plan is retained.')
-        if r.ImGui_Button(ctx,'Stop and close scheduler') then if engine:stop(now,'Scheduler closed by user.') then quit=true end end
-        r.ImGui_SameLine(ctx)
-        if r.ImGui_Button(ctx,'Keep scheduler running') then close_requested=false end
-      end
-      r.ImGui_End(ctx) -- ReaImGui automatically ends collapsed/clipped windows.
     end
+    local preview=Core.make(form)
+    r.ImGui_Separator(ctx)
+    if preview then
+      local begin,ending=Core.bounds(preview)
+      text('Folder: '..Core.folder(preview))
+      muted(ending and ('Recording length: '..duration(ending-begin)) or 'Recording ends manually.')
+      if preview.pre>0 or preview.post>0 then text('Including margins: '..stamp(begin)..' to '..(ending and stamp(ending) or 'manual stop')) end
+    else muted('Enter a name and valid times to preview the recording folder.') end
+    if error~='' then text(error) end
+    if r.ImGui_Button(ctx,editing and 'Save changes' or 'Add slot',140,0) then commit_form(now) end
+    r.ImGui_SameLine(ctx)
+    if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
+  end
+  local function draw_setup()
+    text('Recording destination')
+    r.ImGui_BeginDisabled(ctx,not editable())
+    r.ImGui_SetNextItemWidth(ctx,-1)
+    local changed,value=r.ImGui_InputText(ctx,'##recording_root',state.root)
+    if changed then state.root=value; state.revision=state.revision+1 end
+    muted('Leave blank to use the project recording path.')
+    text(host:root_path(state.root))
+    r.ImGui_Separator(ctx)
+    text('Between slots')
+    local mode=state.mode=='continuous' and 1 or 0
+    r.ImGui_SetNextItemWidth(ctx,-1)
+    changed,value=r.ImGui_Combo(ctx,'##recording_mode',mode,'Separate recordings / one folder per slot\0Continuous live recording / shared folder\0')
+    if changed then state.mode=value==1 and 'continuous' or 'separate'; state.revision=state.revision+1 end
+    text(state.mode=='continuous'
+      and 'Adjacent slots stay in one uninterrupted recording. All files remain in the first slot folder; each slot adds a marker.'
+      or 'Each slot gets its own folder. Stop/start between slots can leave an audio gap.')
+    r.ImGui_Separator(ctx)
+    text('Before enabling')
+    local labels={
+      'Normal record mode; no recording limit or count-in',
+      'Recorded files are kept without a confirmation dialog',
+      'Inputs, levels and available disk space checked',
+      'Computer stays awake; REAPER remains running',
+    }
+    for i,label in ipairs(labels) do
+      changed,value=r.ImGui_Checkbox(ctx,label,setup_checks[i])
+      if changed then
+        setup_checks[i]=value; host.confirmed=true
+        for _,checked in ipairs(setup_checks) do host.confirmed=host.confirmed and checked end
+        last_check=0
+      end
+    end
+    muted('These checks are confirmed by you, not measured by the scheduler.')
+    r.ImGui_EndDisabled(ctx)
+    if not editable() then text('Disable future starts and finish the active recording to change setup.') end
+    if r.ImGui_CollapsingHeader(ctx,'Timing and recovery') then
+      text('Keep REAPER running. Scheduling follows the system clock and is not sample accurate. A late start may be missed.')
+      text('Plans are saved with this project and in a recovery sidecar. After reopening, explicitly enable the schedule again.')
+      text('Completed means new files were found on every expected track. Check the audio before treating a recording as verified.')
+    end
+  end
+  local function draw_schedule(now)
+    if editor_open and editable() then draw_editor(now); return end
+    r.ImGui_BeginDisabled(ctx,not editable())
+    if r.ImGui_Button(ctx,'Add slot',110,0) then start_editor() end
+    r.ImGui_SameLine(ctx)
+    r.ImGui_BeginDisabled(ctx,not undo)
+    if r.ImGui_Button(ctx,'Undo') then
+      local old=Core.deserialize(undo)
+      if old then
+        local revision=state.revision
+        state.slots=old.slots; state.next_id=old.next_id; state.templates=old.templates
+        state.revision=revision+1; undo=nil; selected_id=nil; clear_form()
+      end
+    end
+    r.ImGui_EndDisabled(ctx); r.ImGui_EndDisabled(ctx)
+    r.ImGui_SameLine(ctx)
+    local changed,value=r.ImGui_Checkbox(ctx,'Show history',show_history); if changed then show_history=value end
+    local _,height=r.ImGui_GetContentRegionAvail(ctx)
+    local tableheight=math.max(150,height-155)
+    local flags=r.ImGui_TableFlags_RowBg()|r.ImGui_TableFlags_Resizable()|r.ImGui_TableFlags_ScrollY()
+    if r.ImGui_BeginTable(ctx,'Schedule v2.1',6,flags,0,tableheight) then
+      r.ImGui_TableSetupColumn(ctx,'Name',r.ImGui_TableColumnFlags_WidthStretch())
+      for _,column in ipairs({{'Date',78},{'Start',64},{'End',64},{'Length',84},{'Status',110}}) do
+        r.ImGui_TableSetupColumn(ctx,column[1],r.ImGui_TableColumnFlags_WidthFixed(),column[2])
+      end
+      r.ImGui_TableSetupScrollFreeze(ctx,0,1); r.ImGui_TableHeadersRow(ctx)
+      local visible_count=0
+      for _,s in ipairs(state.slots) do
+        -- Failures remain visible even when successful history is hidden.
+        local hidden=s.status=='Completed' or s.status=='Stopped'
+        if show_history or not hidden then
+          visible_count=visible_count+1
+          r.ImGui_PushID(ctx,s.id); r.ImGui_TableNextRow(ctx,0,34)
+          r.ImGui_TableNextColumn(ctx)
+          if r.ImGui_Selectable(ctx,s.name..'##slot',selected_id==s.id,r.ImGui_SelectableFlags_SpanAllColumns()) then selected_id=s.id end
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%y%m%d',s.start))
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%H:%M',s.start))
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and os.date('%H:%M',s.finish) or 'Open')
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and duration(s.finish-s.start) or '--')
+          r.ImGui_TableNextColumn(ctx); status(s.status)
+          r.ImGui_PopID(ctx)
+        end
+      end
+      if visible_count==0 then
+        r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
+        text(#state.slots==0 and 'Add your first recording slot.' or 'No upcoming slots. Enable Show history to see past recordings.')
+      end
+      r.ImGui_EndTable(ctx)
+    end
+    local selected
+    for _,s in ipairs(state.slots) do if s.id==selected_id then selected=s; break end end
+    if selected then
+      r.ImGui_BeginDisabled(ctx,not editable())
+      r.ImGui_BeginDisabled(ctx,selected.status~='Scheduled')
+      if r.ImGui_Button(ctx,'Edit selected') then start_editor(selected,false) end
+      r.ImGui_EndDisabled(ctx); r.ImGui_SameLine(ctx)
+      if r.ImGui_Button(ctx,'Duplicate') then start_editor(selected,true) end
+      r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,selected.status~='Scheduled')
+      if r.ImGui_Button(ctx,'Delete') then
+        snapshot()
+        for i,s in ipairs(state.slots) do if s.id==selected.id then table.remove(state.slots,i); break end end
+        state.revision=state.revision+1; selected_id=nil; clear_form()
+      end
+      r.ImGui_EndDisabled(ctx); r.ImGui_EndDisabled(ctx)
+      if selected.note~='' then text(selected.note) end
+      if r.ImGui_CollapsingHeader(ctx,'Selected slot details') then
+        text('Folder: '..(selected.folder~='' and selected.folder or Core.folder(selected)))
+        local begin,ending=Core.bounds(selected)
+        text('Recording window: '..stamp(begin)..' to '..(ending and stamp(ending) or 'manual stop'))
+        text('Pre-roll: '..selected.pre..' s  /  Post-roll: '..selected.post..' s')
+      end
+    else muted('Select a slot to edit, duplicate or inspect its details.') end
+    if not editable() then muted('Plan editing is locked while the schedule is enabled or recording.') end
+    if error~='' then text(error) end
+  end
+  local function draw_activity()
+    if r.ImGui_Button(ctx,'Export log') then export() end
+    r.ImGui_SameLine(ctx); muted('Recorded files and scheduling events')
+    if error~='' then text(error) end
+    local _,height=r.ImGui_GetContentRegionAvail(ctx)
+    if r.ImGui_BeginTable(ctx,'Activity',2,r.ImGui_TableFlags_RowBg()|r.ImGui_TableFlags_ScrollY(),0,math.max(120,height-8)) then
+      r.ImGui_TableSetupColumn(ctx,'Time',r.ImGui_TableColumnFlags_WidthFixed(),150)
+      r.ImGui_TableSetupColumn(ctx,'Event',r.ImGui_TableColumnFlags_WidthStretch())
+      r.ImGui_TableSetupScrollFreeze(ctx,0,1); r.ImGui_TableHeadersRow(ctx)
+      for i=#state.log,1,-1 do
+        r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
+        r.ImGui_Text(ctx,os.date('%y%m%d  %H:%M:%S',state.log[i].time))
+        r.ImGui_TableNextColumn(ctx); text(state.log[i].message)
+      end
+      if #state.log==0 then r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx); text('No events yet.') end
+      r.ImGui_EndTable(ctx)
+    end
+  end
+  local function draw(now)
+    r.ImGui_SetNextWindowSize(ctx,940,640,r.ImGui_Cond_FirstUseEver())
+    r.ImGui_SetNextWindowSizeConstraints(ctx,800,540,1600,1400)
+    if close_requested then r.ImGui_SetNextWindowCollapsed(ctx,false) end
+    r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_WindowPadding(),16,14)
+    r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_FramePadding(),10,6)
+    r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_ItemSpacing(),10,8)
+    r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_CellPadding(),8,6)
+    r.ImGui_PushStyleVar(ctx,r.ImGui_StyleVar_FrameRounding(),4)
+    local visible,open=r.ImGui_Begin(ctx,'Recording Scheduler',true)
+    local quit=false
+    if visible then
+      r.ImGui_PushFont(ctx,nil,16)
+      if r.ImGui_BeginTable(ctx,'Transport header',2,r.ImGui_TableFlags_SizingStretchProp()) then
+        r.ImGui_TableSetupColumn(ctx,'State',r.ImGui_TableColumnFlags_WidthStretch())
+        r.ImGui_TableSetupColumn(ctx,'Controls',r.ImGui_TableColumnFlags_WidthFixed(),240)
+        r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
+        local nextslot
+        for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
+        status(engine.active and 'Recording' or (state.enabled and 'Enabled' or (ready and 'Ready' or 'Not ready')))
+        if engine.active then
+          text(engine.active.name)
+          local _,ending=Core.bounds(engine.active)
+          muted(ending and ('Remaining  '..duration(ending-now)) or 'Open-ended / manual stop')
+        elseif nextslot then
+          text('Next: '..nextslot.name)
+          muted(stamp(nextslot.start)..'  /  in '..duration(Core.bounds(nextslot)-now))
+        else text('No upcoming recordings') end
+        r.ImGui_TableNextColumn(ctx)
+        if engine.active then
+          if r.ImGui_Button(ctx,'Stop recording',-1,0) then engine:stop(now) end
+          if engine.active and engine.active.finish and r.ImGui_Button(ctx,'Extend by 5 min',-1,0) then local ok,err=engine:extend(now,300); if not ok then error=err end end
+        elseif state.enabled then
+          if r.ImGui_Button(ctx,'Disable schedule',-1,0) then engine:disable(now) end
+        else
+          r.ImGui_BeginDisabled(ctx,not ready or loaderr~=nil or editor_open)
+          if r.ImGui_Button(ctx,'Enable schedule',-1,0) then save(); local ok,err=engine:enable(now); if not ok then error=err end end
+          r.ImGui_EndDisabled(ctx)
+          if not ready and r.ImGui_Button(ctx,'Review setup',-1,0) then view='Setup' end
+        end
+        if engine.active and state.enabled and r.ImGui_Button(ctx,'Disable future starts',-1,0) then engine:disable(now) end
+        r.ImGui_EndTable(ctx)
+      end
+      local project_name=r.GetProjectName(project,'')
+      muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks  /  '..(state.mode=='continuous' and 'Continuous live' or 'Separate slots'))
+      if not engine.active and not ready then text(readiness) end
+      if loaderr then text(loaderr) end
+      if host.storage_error then text(host.storage_error) end
+      if close_requested then
+        text('Close scheduler? The current recording will stop and future starts will be disabled. Your plan is retained.')
+        if r.ImGui_Button(ctx,'Stop and close') then if engine:stop(now,'Scheduler closed by user.') then quit=true end end
+        r.ImGui_SameLine(ctx)
+        if r.ImGui_Button(ctx,'Keep running') then close_requested=false end
+      end
+      r.ImGui_Separator(ctx)
+      for _,name in ipairs({'Schedule','Setup','Activity'}) do
+        if name~='Schedule' then r.ImGui_SameLine(ctx) end
+        if r.ImGui_Selectable(ctx,name,view==name,0,100,26) then view=name end
+      end
+      r.ImGui_Separator(ctx)
+      if view=='Schedule' then draw_schedule(now)
+      elseif view=='Setup' then draw_setup()
+      else draw_activity() end
+      r.ImGui_PopFont(ctx)
+      r.ImGui_End(ctx)
+    end
+    r.ImGui_PopStyleVar(ctx,5)
     if not open then if state.enabled or engine.active then close_requested=true else quit=true end end
     return not quit
   end

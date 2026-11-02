@@ -26,3 +26,7 @@
 - Never imply gapless folder changes: separate slots stop/start; continuous adjacent
   slots retain the first slot's folder and add markers.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
+
+- Keep the Scheduler main view focused on status and the schedule. Put configuration
+  in Setup, logs in Activity, and slot editing behind an explicit action. Keep
+  advanced slot options collapsed by default; avoid per-row button clusters.

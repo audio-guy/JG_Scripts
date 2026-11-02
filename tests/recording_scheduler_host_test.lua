@@ -72,6 +72,9 @@ test('full collapsed UI executes actual scheduled start and stop',function()
   api.GetExtState=function(_,k) return ext[k] or '' end; api.SetExtState=function(_,k,v) ext[k]=v end; api.DeleteExtState=function(_,k) ext[k]=nil end
   api.GetProjExtState=function() return 1,C.serialize(st) end; api.SetProjExtState=noop
   api.ImGui_CreateContext=function() return {} end; api.ImGui_SetNextWindowSize=noop; api.ImGui_Cond_FirstUseEver=function() return 0 end
+  api.ImGui_ConfigFlags_NavEnableKeyboard=function() return 1 end
+  api.ImGui_SetNextWindowSizeConstraints=noop; api.ImGui_PushStyleVar=noop; api.ImGui_PopStyleVar=noop
+  for _,key in ipairs({'WindowPadding','FramePadding','ItemSpacing','CellPadding','FrameRounding'}) do api['ImGui_StyleVar_'..key]=function() return 0 end end
   api.ImGui_Begin=function() return false,true end; api.ImGui_End=function() error('Collapsed windows must not call End') end
   api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=function(fn) queue[#queue+1]=fn end; api.time_precise=function() return now end
   api.ShowMessageBox=function(message) error(message) end
@@ -91,29 +94,61 @@ test('full collapsed UI executes actual scheduled start and stop',function()
   files[root..'/session.rpp.jg-scheduler']=true
   assert(ok,err)
 end)
-test('visible UI balances native stacks and renders templates/history',function()
+test('schedule, setup, activity and editor flows preserve data and native stacks',function()
   os.remove(root..'/session.rpp.jg-scheduler')
   local h,api=rig(); local st=C.new(); assert(C.apply(st,{slot('Visible test')}))
   st.templates={{name='Template',start='19:30',finish='20:30',open=false,pre='0',post='0',enddays=0}}
   local ext,exits={},{}; local windows,disabled,ids,tables=0,0,0,0
+  local clicked,typed,tab,queued=nil,{},nil,nil
+  local shown={}
+  local function record(_,label) shown[label]=true end
   local noop=function() end
   api.GetExtState=function(_,k) return ext[k] or '' end; api.SetExtState=function(_,k,v) ext[k]=v end; api.DeleteExtState=function(_,k) ext[k]=nil end
   api.GetProjExtState=function() return 1,C.serialize(st) end; api.SetProjExtState=noop
   api.ImGui_CreateContext=function() return {} end; api.ImGui_SetNextWindowSize=noop; api.ImGui_Cond_FirstUseEver=function() return 0 end
+  api.ImGui_ConfigFlags_NavEnableKeyboard=function() return 1 end
+  api.ImGui_SetNextWindowSizeConstraints=noop; api.ImGui_PushStyleVar=noop; api.ImGui_PopStyleVar=noop
+  for _,key in ipairs({'WindowPadding','FramePadding','ItemSpacing','CellPadding','FrameRounding'}) do api['ImGui_StyleVar_'..key]=function() return 0 end end
   api.ImGui_Begin=function() windows=windows+1; return true,true end; api.ImGui_End=function() windows=windows-1; assert(windows>=0) end
   api.ImGui_BeginDisabled=function() disabled=disabled+1 end; api.ImGui_EndDisabled=function() disabled=disabled-1; assert(disabled>=0) end
   api.ImGui_BeginTable=function() tables=tables+1; return true end; api.ImGui_EndTable=function() tables=tables-1 end
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
-  for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow'}) do api['ImGui_'..key]=noop end
-  for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen'}) do api['ImGui_'..key]=function() return 0 end end
-  api.ImGui_CollapsingHeader=function() return true end
-  api.ImGui_Checkbox=function(_,_,value) return false,value end; api.ImGui_InputText=api.ImGui_Checkbox; api.ImGui_Combo=api.ImGui_Checkbox
-  api.ImGui_Button=function() return false end
+  for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
+  for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns'}) do api['ImGui_'..key]=function() return 0 end end
+  api.ImGui_CollapsingHeader=function() return false end
+  api.ImGui_TextWrapped=record; api.ImGui_Text=record
+  api.ImGui_Checkbox=function(_,_,value) return false,value end
+  api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
+  api.ImGui_Combo=api.ImGui_Checkbox
+  api.ImGui_Button=function(_,label) shown[label]=true; return clicked==label end
+  api.ImGui_Selectable=function(_,label) return tab==label end
+  api.ImGui_GetContentRegionAvail=function() return 900,500 end
   api.GetProjectName=function() return 'session.rpp' end
-  api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=noop; api.time_precise=function() return 0 end
+  api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=function(fn) queued=fn end; api.time_precise=function() return 0 end
   api.ShowMessageBox=function(message) error(message) end
   local old=H.new; H.new=function() return h end
-  local ok,err=pcall(M.run,api); H.new=old
+  local ok,err=pcall(function()
+    M.run(api)
+    assert(shown['Add slot'] and not shown['##name'] and not shown['Export log'])
+    local function frame(button,values,selected)
+      clicked,typed,tab,shown=button,values or {},selected,{}
+      assert(queued)(); eq(windows,0); eq(disabled,0); eq(ids,0); eq(tables,0)
+    end
+    frame('Add slot'); frame()
+    assert(shown['##name'] and shown['##start'] and not shown['##pre'])
+    frame('Add slot',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
+    local f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); local saved=assert(C.deserialize(f:read('*a'))); f:close()
+    eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture')
+    frame(nil,nil,'Setup'); assert(shown['##recording_root'] and not shown['##name'])
+    frame(nil,nil,'Activity'); assert(shown['Export log'] and not shown['##recording_root'])
+    frame(nil,nil,'Schedule'); assert(shown['Add slot'] and not shown['##name'])
+    frame(nil,nil,'Future capture##slot'); frame('Edit selected'); frame()
+    assert(shown['Save changes'])
+    frame('Cancel',{['##name']='Discarded edit'}); frame()
+    f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); saved=assert(C.deserialize(f:read('*a'))); f:close()
+    eq(saved.slots[2].name,'Future capture')
+  end)
+  H.new=old
   for _,f in ipairs(exits) do f() end
   assert(ok,err); eq(windows,0); eq(disabled,0); eq(tables,0); eq(ids,0)
   files[root..'/session.rpp.jg-scheduler']=true
