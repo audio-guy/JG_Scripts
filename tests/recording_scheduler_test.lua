@@ -1,0 +1,72 @@
+local M=assert(loadfile('Tools/JG_Recording_Scheduler.lua'))('__test')
+local C,E,H=M.Core,M.Engine,M.Host
+local tests=0
+local function test(name,fn) local ok,err=pcall(fn); if not ok then error(name..': '..tostring(err)) end; tests=tests+1; print('PASS '..name) end
+local function eq(a,b) assert(a==b,tostring(a)..' ~= '..tostring(b)) end
+local function form(extra)
+  local f={name='Concert',date='261102',start='19:30',enddate='261102',finish='20:30',pre='0',post='0'}
+  for k,v in pairs(extra or {}) do f[k]=v end; return f
+end
+local function slot(extra) return assert(C.make(form(extra))) end
+local start=assert(C.datetime('261102','1930'))
+local function rig(slots,mode)
+  local state=C.new(); assert(C.apply(state,slots)); state.mode=mode or 'separate'
+  local host={rec=false,valid_project=true,selected_project=true,ready=true,verified=true,starts=0,stops=0,markers=0,restores=0}
+  function host:valid() return self.valid_project end
+  function host:selected() return self.selected_project end
+  function host:preflight() if not self.ready then return nil,'Not ready' end; return true end
+  function host:recording() return self.rec end
+  function host:start(s) self.starts=self.starts+1; self.rec=not self.fail_start; s.folder=C.folder(s); return self.rec,'Start failed' end
+  function host:stop() self.stops=self.stops+1; if not self.fail_stop then self.rec=false end end
+  function host:marker() self.markers=self.markers+1 end
+  function host:restore() self.restores=self.restores+1 end
+  function host:verify() return self.verified,'Missing audio files' end
+  local engine=E.new(state,host)
+  return state,host,engine
+end
+local function tick(e,t) return e:tick(t,t) end
+
+test('strict valid date/time formats',function() eq(C.datetime('261102','1930'),C.datetime('2026-11-02','19:30')) end)
+test('reject invalid hour and minute',function() assert(not C.datetime('261102','2561')); assert(not C.datetime('261102','2360')) end)
+test('reject impossible calendar dates',function() assert(not C.datetime('260231','1200')); assert(not C.datetime('260229','1200')); assert(C.datetime('280229','1200')) end)
+test('reject malformed end rather than converting to open end',function() assert(not C.make(form{finish='123'})); assert(not C.make(form{finish=''})) end)
+test('open end is explicit',function() local s=slot{open=true,finish=''}; eq(s.finish,nil) end)
+test('overnight requires explicit end date',function() assert(not C.make(form{start='23:30',finish='00:30'})); assert(C.make(form{start='23:30',finish='00:30',enddate='261103'})) end)
+test('equal start/end rejected',function() assert(not C.make(form{finish='19:30'})) end)
+test('folder naming uses scheduled start and preserves name',function() local s=slot{name='Konzert / Äö 😀',pre='90'}; eq(C.folder(s),'261102 - 1930 Konzert _ Äö 😀'); eq(s.name,'Konzert / Äö 😀') end)
+test('folder name cannot traverse directories',function() assert(not C.folder(slot{name='../x\\y\n:*?'}):find('[/\\]')) end)
+test('margins validated and applied',function() assert(not C.make(form{pre='-1'})); assert(not C.make(form{post='1.5'})); local a,b=C.bounds(slot{pre='30',post='60'}); eq(a,start-30); eq(b,start+3660) end)
+test('overlap rejected atomically including margins',function() local st=C.new(); assert(C.apply(st,{slot()})); local before=C.serialize(st); assert(not C.apply(st,{slot{start='20:30',finish='21:30',pre='30'}})); eq(C.serialize(st),before) end)
+test('open end conflicts with later slots',function() local st=C.new(); assert(C.apply(st,{slot{open=true}})); assert(not C.apply(st,{slot{start='21:00',finish='22:00'}})) end)
+test('adjacent slots allowed',function() local st=C.new(); assert(C.apply(st,{slot(),slot{start='20:30',finish='21:30'}})) end)
+test('edit replaces by stable id without duplicate',function() local st=C.new(); assert(C.apply(st,{slot()})); assert(C.apply(st,{slot{name='Revised'}},st.slots[1].id)); eq(#st.slots,1); eq(st.slots[1].name,'Revised') end)
+test('repeated slots preserve local wall clock',function() local ss=assert(C.repeat_slots(slot(),3,7)); eq(#ss,3); eq(os.date('%y%m%d %H:%M',ss[2].start),'261109 19:30') end)
+test('repeat rejects invalid counts and endless entries',function() assert(not C.repeat_slots(slot(),101,1)); assert(not C.repeat_slots(slot{open=true},2,1)) end)
+test('serialization round trip preserves arbitrary user content',function() local st=C.new(); assert(C.apply(st,{slot{name='Ä\t%\n$ Concert'}})); C.add_log(st,start,'Text\nTabs\t%'); st.root='/recordings A'; local restored=assert(C.deserialize(C.serialize(st))); eq(C.serialize(st),C.serialize(restored)); eq(restored.enabled,false) end)
+test('storage never executes Lua',function() assert(not C.deserialize('os.execute("bad")')); assert(not C.deserialize('JG_RECORDING_SCHEDULER\t2\nS\tbad\n')) end)
+test('restored recording is interrupted and disarmed',function() local st=C.new(); assert(C.apply(st,{slot()})); st.slots[1].status='Recording'; local restored=assert(C.deserialize(C.serialize(st))); eq(restored.slots[1].status,'Interrupted'); eq(restored.enabled,false) end)
+test('disabled scheduler does not start',function() local st,h,e=rig{slot()}; tick(e,start); eq(h.starts,0); eq(st.slots[1].status,'Scheduled') end)
+test('enable refuses past start and absent readiness',function() local st,h,e=rig{slot()}; assert(not e:enable(start)); h.ready=false; assert(not e:enable(start-10)) end)
+test('scheduled recording starts and verifies completion',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); eq(h.starts,1); eq(st.slots[1].status,'Recording'); tick(e,start+3600); eq(h.stops,1); eq(st.slots[1].status,'Completed'); eq(h.restores,1) end)
+test('missed slot is never completed',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start+4000); eq(st.slots[1].status,'Missed'); eq(h.starts,0) end)
+test('late wakeup never silently starts',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start+6); eq(st.slots[1].status,'Missed'); eq(h.starts,0) end)
+test('failed start disables further starts and is not recording',function() local st,h,e=rig{slot()}; h.fail_start=true; assert(e:enable(start-10)); tick(e,start); eq(st.slots[1].status,'Failed'); eq(st.enabled,false); eq(e.active,nil) end)
+test('unverified files never count as success',function() local st,h,e=rig{slot()}; h.verified=false; assert(e:enable(start-10)); tick(e,start); tick(e,start+3600); eq(st.slots[1].status,'Failed') end)
+test('manual stop disarms without restarting the slot',function() local st,h,e=rig{slot{open=true}}; assert(e:enable(start-10)); tick(e,start); h.rec=false; tick(e,start+1); tick(e,start+2); eq(h.starts,1); eq(st.slots[1].status,'Stopped'); eq(st.enabled,false) end)
+test('disabling future starts preserves planned stop',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); e:disable(start+5); tick(e,start+3600); eq(h.stops,1); eq(st.slots[1].status,'Completed') end)
+test('project tab switch disarms and still stops owned recording',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); h.selected_project=false; tick(e,start+1); eq(st.enabled,false); tick(e,start+3600); eq(h.stops,1) end)
+test('closed project never receives a stop/start',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); h.valid_project=false; eq(tick(e,start),false); eq(h.starts,0); eq(h.stops,0) end)
+test('continuous slots share one uninterrupted take and first folder',function() local st,h,e=rig({slot(),slot{start='20:30',finish='21:30',name='Encore'}},'continuous'); assert(e:enable(start-10)); tick(e,start); tick(e,start+3600); eq(h.starts,1); eq(h.stops,0); eq(st.slots[2].folder,st.slots[1].folder); eq(h.markers,2); tick(e,start+7200); eq(h.stops,1); eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed') end)
+test('separate slots stop and restart into their own folders',function() local st,h,e=rig({slot(),slot{start='20:30',finish='21:30',name='Encore'}}); assert(e:enable(start-10)); tick(e,start); tick(e,start+3600); eq(h.starts,2); eq(h.stops,1); assert(st.slots[2].folder~=st.slots[1].folder) end)
+test('clock jump disarms and marks active session for review',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); e:tick(start,100); e:tick(start+100,101); eq(st.enabled,false); assert(st.slots[1].note:find('clock')); e:tick(start+3600,3600); eq(st.slots[1].status,'Partial') end)
+test('explicit close stops and marks stopped',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); e:stop(start+30,'Closed'); eq(h.stops,1); eq(st.slots[1].status,'Stopped'); eq(st.enabled,false) end)
+test('failed stop retains ownership for retry',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); h.fail_stop=true; assert(not e:stop(start+30)); assert(e.active); eq(h.rec,true) end)
+
+test('live extension updates end and rejects conflicts',function()
+  local st,h,e=rig{slot()}; assert(e:enable(start-10)); tick(e,start); assert(e:extend(start+1,300)); tick(e,start+3600); eq(h.stops,0); tick(e,start+3900); eq(h.stops,1)
+  st,h,e=rig{slot(),slot{start='20:30',finish='21:30'}}; assert(e:enable(start-10)); tick(e,start); assert(not e:extend(start+1,300)); eq(st.slots[1].finish,start+3600)
+end)
+test('DST nonexistent and ambiguous times rejected in Europe/Berlin',function()
+  if os.getenv('TZ')=='Europe/Berlin' then assert(not C.datetime('260329','02:30')); assert(not C.datetime('261025','02:30')) end
+end)
+print(string.format('%d scheduler tests passed.',tests))

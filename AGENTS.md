@@ -16,3 +16,13 @@
 
 - When changing shared output text, check the interface and all export paths,
   especially PDF headings. Do not assume the preview and PDF share their labels.
+
+## Recording Scheduler
+
+- Target unattended recordings and attended live capture, not studio workflows.
+- Generated slot folder, marker and recording-tag names use `YYMMDD - HHMM Name`.
+  Use the planned slot start even when pre-roll is enabled; preserve user names in data.
+- Keep scheduling independent of window visibility and bound to the original project.
+- Never imply gapless folder changes: separate slots stop/start; continuous adjacent
+  slots retain the first slot's folder and add markers.
+- See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
