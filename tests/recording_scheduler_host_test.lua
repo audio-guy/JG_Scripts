@@ -18,6 +18,8 @@ local function rig()
     GetMediaTrackInfo_Value=function(_,key) return key=='I_RECARM' and 1 or 0 end,
     GetAudioDeviceInfo=function() return true,'48000' end, GetSetRepeatEx=function(project) eq(project,p); return 0 end,
     GetProjectPathEx=function(project) eq(project,p); return root end,
+    GetProjectTimeOffset=function() return 0 end,
+    GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 0 or 60 end,
     RecursiveCreateDirectory=function(path) dirs[path]=true; assert(os.execute('mkdir -p '..string.format('%q',path))) end,
     genGuid=function() return '{probe}' end,
     GetSetProjectInfo_String=function(project,key,value,set) eq(project,p); if set then cfg[key]=value end; return true,cfg[key] end,
@@ -25,7 +27,7 @@ local function rig()
     CountTakes=function() return 1 end, GetTake=function(item) return item end, TakeIsMIDI=function() return false end,
     GetMediaItemTake_Source=function(take) return take end, GetMediaSourceFileName=function(source) return source end, GetMediaSourceLength=function() return 60,false end,
     GetCursorPositionEx=function(project) eq(project,p); return 5 end, GetProjectLength=function(project) eq(project,p); return 100 end,
-    SetEditCurPos2=function(project,position) eq(project,p); eq(position,100) end,
+    SetEditCurPos2=function(project,position) eq(project,p); eq(position,70200) end,
     Main_OnCommandEx=function(cmd,_,project) eq(project,p); eq(cmd,1013); rec=true; commands[#commands+1]=cmd end,
     OnStopButtonEx=function(project) eq(project,p); rec=false; stopped=stopped+1 end,
     AddProjectMarker2=function(project) eq(project,p) end, GetPlayPositionEx=function(project) eq(project,p); return 100 end,
@@ -37,6 +39,41 @@ local function slot(name)
   return assert(C.make{name=name or 'Konzert',date='261102',start='19:30',enddate='261102',finish='20:30',pre='0',post='0'})
 end
 
+test('0052 recording uses timeline 00:52 rather than cursor or project end',function()
+  local h,api=rig(); local position
+  api.GetCursorPositionEx=function() return 269 end
+  api.GetProjectLength=function() return 269 end
+  api.GetProjectTimeOffset=function() return 0 end
+  api.SetEditCurPos2=function(_,value) position=value end
+  local s=assert(C.make{name='Clock placement',date='261103',start='0052',finish='0053'})
+  assert(h:start(s,'')); eq(position,52*60)
+end)
+test('timeline placement honors project offset and actual late start',function()
+  local h,api=rig(); local position
+  api.GetProjectTimeOffset=function() return 3600 end
+  api.SetEditCurPos2=function(_,value) position=value end
+  local s=slot(); assert(h:start(s,'',false,s.start+3,C.midnight(s.start)))
+  eq(position,70203-3600)
+end)
+test('next-day slots keep their chronological timeline position',function()
+  local h,api=rig(); local position
+  api.SetEditCurPos2=function(_,value) position=value end
+  local first=assert(C.datetime('261102','23:00'))
+  local s=assert(C.make{name='Next day',date='261103',start='0052',finish='0053'})
+  assert(h:start(s,'',false,s.start,C.midnight(first))); eq(position,86400+3120)
+end)
+test('overlapping media blocks recording before any settings or transport change',function()
+  local h,api,cfg,sources,commands=rig(); sources[1]='existing.wav'
+  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 70200 or 60 end
+  local ok,err=h:start(slot(),''); assert(not ok and err:find('overlaps'))
+  eq(#commands,0); eq(cfg.RECORD_PATH,'original'); eq(cfg.RECTAG,'original tag')
+  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 80000 or 60 end
+  local s=slot(); s.finish=nil; assert(not h:start(s,''))
+end)
+test('negative position from project start offset fails instead of seeking elsewhere',function()
+  local h,api,cfg,sources,commands=rig(); api.GetProjectTimeOffset=function() return 86400 end
+  local ok,err=h:start(slot(),''); assert(not ok and err:find('timeline start')); eq(#commands,0)
+end)
 test('adapter sets dedicated folder and restores exact original settings',function()
   local h,api,cfg=rig(); local s=slot(); assert(h:preflight()); assert(h:start(s,'')); eq(cfg.RECORD_PATH,root..'/261102 - 1930 Konzert'); eq(cfg.RECTAG,'261102 - 1930 Konzert'); eq(s.folder,cfg.RECORD_PATH)
   h:stop(); h:restore(); eq(cfg.RECORD_PATH,'original'); eq(cfg.RECTAG,'original tag')
@@ -84,17 +121,17 @@ test('continuous host creates linked regions and captures original source positi
   end
   api.EnumProjectMarkers3=function(_,i) local r=regions[i+1]; if not r then return 0 end; return 1,true,r.pos,r.finish,r.name,i+1,0 end
   api.GetTrackName=function() return true,'Input' end; api.GetTrackGUID=function() return '{track}' end
-  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 100 or 6 end
+  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 70200 or 6 end
   api.GetMediaItemTakeInfo_Value=function(_,key) return key=='D_PLAYRATE' and 1 or 0 end
   local e=E.new(st,h); e:watch(a.start-10); e:tick(a.start,0)
-  eq(#commands,1); eq(#regions,2); eq(regions[1].pos,100); eq(regions[2].pos,104)
+  eq(#commands,1); eq(#regions,2); eq(regions[1].pos,70200); eq(regions[2].pos,70204)
   eq(#st.captures,1); eq(st.captures[1].bands[2].region,2)
   e:tick(a.start+3,3); eq(h:recording(),true)
   local path=cfg.RECORD_PATH..'/input.wav'; write(path,'recorded audio'); sources[1]=path
   e:tick(a.start+6,6); eq(h:recording(),false); eq(#commands,1)
   eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed')
   local c=assert(C.deserialize(C.serialize(st))).captures[1]
-  eq(c.files[1].position,100); eq(c.files[1].length,6); eq(c.files[1].offset,0)
+  eq(c.files[1].position,70200); eq(c.files[1].length,6); eq(c.files[1].offset,0)
   eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
 end)
 test('full collapsed UI executes actual scheduled start and stop',function()

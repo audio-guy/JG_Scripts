@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.0
+-- @version 2.5.1
 -- @changelog
+--   Place recordings by clock time on the timeline; preserve a project reference day.
+--   Reject collisions on armed tracks instead of appending after existing material.
 --   Add explicit continuous recording, editable band regions and raw WAV band export.
 --   Remove templates from the slot editor; use Duplicate for similar slots.
 --   Allow deleting inactive slots without touching audio; remove redundant slot details.
@@ -22,7 +24,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.0' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.1' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -67,6 +69,10 @@ function Core.folder(slot)
   -- Preserve UTF-8; limit the derived filename only, never the user's slot name.
   if #name>160 then name=name:sub(1,160):gsub('[\194-\244][\128-\191]*$','') end
   return stamp(slot.start)..' '..name
+end
+function Core.midnight(t)
+  local day=os.date('*t',t); day.hour,day.min,day.sec,day.isdst=0,0,0,nil
+  return os.time(day)
 end
 function Core.bounds(s) return s.start-s.pre, s.finish and s.finish+s.post end
 function Core.make(form)
@@ -120,7 +126,7 @@ end
 
 -- A versioned, escaped data format; never execute stored project data as Lua.
 function Core.serialize(st)
-  local out={row('JG_RECORDING_SCHEDULER',3),row('P',st.mode,st.root,st.next_id,st.revision,st.paused and '1' or '0')}
+  local out={row('JG_RECORDING_SCHEDULER',3),row('P',st.mode,st.root,st.next_id,st.revision,st.paused and '1' or '0',st.timeline_origin or '')}
   for _,s in ipairs(st.slots) do out[#out+1]=row('S',s.id,s.name,s.start,s.finish or '',s.pre,s.post,s.status,s.note,s.actual_start or '',s.actual_end or '',s.folder or '') end
   for _,c in ipairs(st.captures or {}) do
     out[#out+1]=row('C',c.id,c.wall,c.position,c.folder,c.error or '')
@@ -144,6 +150,8 @@ function Core.deserialize(text)
       if f[2]~='separate' and f[2]~='continuous' then return nil,'Invalid recording mode in saved plan.' end
       st.mode,st.root,st.next_id,st.revision=version==3 and f[2] or 'separate',f[3],tonumber(f[4]),tonumber(f[5])
       st.paused=f[6]=='1'
+      st.timeline_origin=tonumber(f[7])
+      if f[7] and f[7]~='' and not finite(st.timeline_origin) then return nil,'Invalid timeline reference day.' end
       if not finite(st.next_id) or st.next_id<1 or not finite(st.revision) then return nil,'Invalid plan metadata.' end
     elseif f[1]=='S' then
       local s={id=tonumber(f[2]),name=f[3],start=tonumber(f[4]),finish=tonumber(f[5]),pre=tonumber(f[6]),post=tonumber(f[7]),status=f[8],note=f[9],actual_start=tonumber(f[10]),actual_end=tonumber(f[11]),folder=f[12]}
@@ -254,11 +262,13 @@ function Engine:start_session(s,now)
     transport=copy(s); transport.name='Continuous recording'; transport.finish=members[#members].finish
   end
   local ok,err=self.host:preflight(false)
-  if ok then ok,err=self.host:start(transport,self.state.root,continuous,now) end
+  local origin=self.state.timeline_origin or Core.midnight(now)
+  if ok then ok,err=self.host:start(transport,self.state.root,continuous,now,origin) end
   if not ok or not self.host:recording() then
     s.status='Failed'; s.note=err or 'REAPER did not enter recording.'
     self.host:restore(); self:disable(now,Core.folder(s)..': '..s.note); return
   end
+  self.state.timeline_origin=origin
   self.active=transport; self.session=members; self.continuous=continuous
   transport.actual_start=now
   if now-s.start>2 then transport.note='Recording started '..(now-s.start)..' seconds late.' end
@@ -445,8 +455,22 @@ function Host:source_map()
   end
   return files,lengths
 end
-function Host:start(slot,root,continuous,now)
+function Host:start(slot,root,continuous,now,origin)
   local r=self.r
+  now=now or slot.start; origin=origin or Core.midnight(now)
+  local position=now-origin-r.GetProjectTimeOffset(self.project,false)
+  if position<0 then return nil,'The recording time is before the project timeline start. Adjust the project start time.' end
+  local ending=slot.finish and position+slot.finish-now or math.huge
+  for _,track in ipairs(self:tracks()) do
+    for i=0,r.CountTrackMediaItems(track)-1 do
+      local item=r.GetTrackMediaItem(track,i)
+      local begin=r.GetMediaItemInfo_Value(item,'D_POSITION')
+      local finish=begin+r.GetMediaItemInfo_Value(item,'D_LENGTH')
+      if begin<ending and finish>position then
+        return nil,'Existing media overlaps the recording time on an armed track. Move it or use an empty recording track.'
+      end
+    end
+  end
   local folder=continuous and (stamp(slot.start)..' Originals '..self.r.genGuid():gsub('[^%w]','')) or Core.folder(slot)
   local path=join(self:root_path(root),folder)
   local ok,err=self:writable(path); if not ok then return nil,err end
@@ -457,8 +481,7 @@ function Host:start(slot,root,continuous,now)
   local changed=r.GetSetProjectInfo_String(self.project,'RECORD_PATH',path,true)
   if not changed then self:restore(); return nil,'REAPER rejected the recording folder.' end
   r.GetSetProjectInfo_String(self.project,'RECTAG',self.saved.newtag,true)
-  -- Append after existing content. Never seek to a wall-clock position over user media.
-  local position=math.max(r.GetCursorPositionEx(self.project),r.GetProjectLength(self.project))
+  -- Position follows the reference day and project display offset, never the cursor.
   self.capture_position=position
   r.SetEditCurPos2(self.project,position,false,false)
   self.owns_transport=true
@@ -840,6 +863,7 @@ local function run(r)
     if editor_open and error~='' then text(error) end
   end
   local function draw_setup()
+    if state.timeline_origin then muted('Timeline reference day: '..os.date('%y%m%d',state.timeline_origin)) end
     text('Recording mode')
     r.ImGui_BeginDisabled(ctx,not setup_editable())
     local mode_changed,mode=r.ImGui_Combo(ctx,'##mode',state.mode=='continuous' and 0 or 1,'Continuous recording\0Separate slots\0')

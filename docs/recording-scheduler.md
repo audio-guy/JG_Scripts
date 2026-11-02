@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.0
+# Recording Scheduler 2.5.1
 
 ## Purpose
 
@@ -39,6 +39,24 @@ the first start; the start-time safety check still runs.
 Missed slots that never started recording can be edited and saved with a new future
 start, including when the original start passes while the editor is open. Slots
 that already ran or attempted to record retain their history; use Duplicate instead.
+
+## Timeline placement
+
+A start at 00:52 is placed at timeline time 00:52:00, independent of the edit cursor
+or project length. The first recording establishes a midnight reference day, saved
+with the project and shown in Setup. Later days continue beyond 24 hours rather
+than wrapping over existing recordings. Project start-time offsets are respected;
+a resulting position before the project start is rejected. Late starts are placed
+at their actual start time rather than backdated to the intended start.
+
+The recording span is checked against existing media on armed tracks before any
+recording settings or transport changes. A collision blocks the start with an error;
+existing material is never automatically moved or overwritten. Existing recordings
+and region/export maps from earlier versions stay where they are.
+
+Timeline time is elapsed time from the reference midnight. A daylight-saving clock
+change cannot be mirrored during continuous audio without a timeline discontinuity;
+after such a change, elapsed timeline time can differ from local clock time.
 
 ## Recording destination
 
