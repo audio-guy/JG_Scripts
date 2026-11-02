@@ -1,4 +1,4 @@
-# Recording Scheduler 2.4.2
+# Recording Scheduler 2.4.3
 
 ## Purpose
 
@@ -73,8 +73,7 @@ checks remain enforced. There is no admin/guest distinction.
   initially; failures remain visible. Show history reveals past entries.
   Delete removes any inactive slot from the plan, including failed and completed
   slots. It never deletes audio files. Undo restores the removed entry.
-- **Slot editor:** name, dates and times, with optional templates in a collapsed
-  section. Save returns to the plan; Cancel discards the draft. Switching views
+- **Slot editor:** name, dates and times. Use Duplicate for similar slots. Save returns to the plan; Cancel discards the draft. Switching views
   preserves the draft. Existing slots keep running on schedule while you plan another.
 - **Setup:** recording folder and optional recording help.
 - **Activity:** all events and verified file paths, newest first; Export log writes
@@ -82,7 +81,7 @@ checks remain enforced. There is no admin/guest distinction.
 
 Plan changes are allowed while waiting for scheduled starts, but locked during an
 active recording. Pause scheduling before changing the destination folder. The active end can be extended by five minutes if it
-does not conflict with another slot. Undo restores the last plan/template change.
+does not conflict with another slot. Undo restores the last plan change.
 Pause schedule leaves an active recording's scheduled stop intact. Stop recording
 stops the owned recording and disables future starts. Closing during an active recording asks whether to stop and close or keep running.
 Otherwise closing directly disables future starts and retains the plan.
@@ -110,7 +109,7 @@ Starts over five seconds late are missed; late stops or clock changes require re
 
 ## Persistence and migration
 
-Plans, templates and logs are stored in project extstate and an immediate recovery
+Plans and logs are stored in project extstate and an immediate recovery
 sidecar, `<project>.rpp.jg-scheduler`. Save the project normally to embed the extstate;
 keep the sidecar with the project. Failed recovery-file writes disable future starts.
 Corrupt data is preserved for recovery instead of overwritten.
@@ -120,8 +119,9 @@ An explicit pause is retained across reopening. Past starts become Missed; previ
 active slots become Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
 with pre/post-roll are converted to visible direct start/end times, preserving the
 actual recording window including seconds. Completed history retains its original
-times. Duplicating legacy history or applying an old template exposes its effective
-times in the editor rather than silently applying hidden margins.
+times. Duplicating legacy history exposes its effective times in the editor rather
+than silently applying hidden margins. Legacy template data remains readable and
+is preserved for compatibility, but templates are no longer available in the UI.
 
 ## Results
 

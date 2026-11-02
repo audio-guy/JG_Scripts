@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.4.2
+-- @version 2.4.3
 -- @changelog
+--   Remove templates from the slot editor; use Duplicate for similar slots.
 --   Allow deleting inactive slots without touching audio; remove redundant slot details.
 --   Require a saved project when saving or resuming a schedule.
 --   Allow rescheduling missed slots, including when their start passes during editing.
@@ -20,7 +21,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.4.2' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.4.3' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -457,7 +458,7 @@ local function run(r)
   local pause_requested=state.paused or false
   local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
-  local editing=nil; local error=loaderr or ''; local template_index=1
+  local editing=nil; local error=loaderr or ''
   local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
   local undo=nil
   local function save()
@@ -564,44 +565,6 @@ local function run(r)
     end
     local changed,value=r.ImGui_Checkbox(ctx,'Open end',form.open)
     if changed then form.open=value end
-    if r.ImGui_CollapsingHeader(ctx,'Templates') then
-      if #state.templates>0 then
-        local names={}; for _,t in ipairs(state.templates) do names[#names+1]=t.name end
-        local choice
-        changed,choice=r.ImGui_Combo(ctx,'Saved template',template_index-1,table.concat(names,'\0')..'\0')
-        if changed then template_index=choice+1 end
-        if r.ImGui_Button(ctx,'Apply template') then
-          local t=state.templates[template_index] or state.templates[1]
-          for _,key in ipairs({'name','start','finish','open','pre','post'}) do form[key]=t[key] end
-          local date=Core.datetime(form.date,'12:00')
-          if date then
-            local d=os.date('*t',date)
-            form.enddate=os.date('%y%m%d',os.time{year=d.year,month=d.month,day=d.day+t.enddays,hour=12})
-          end
-          local start=Core.datetime(form.date,form.start)
-          local finish=not form.open and Core.datetime(form.enddate,form.finish) or nil
-          if start then
-            start=start-(tonumber(t.pre) or 0)
-            form.date,form.start=os.date('%y%m%d',start),clocktime(start)
-          end
-          if finish then
-            finish=finish+(tonumber(t.post) or 0)
-            form.enddate,form.finish=os.date('%y%m%d',finish),clocktime(finish)
-          end
-          form.pre,form.post='0','0'
-        end
-      else muted('No templates saved in this project.') end
-      if r.ImGui_Button(ctx,'Save form as template') then
-        local s,err=Core.make(form)
-        if not s then error=err else
-          snapshot()
-          local a=os.date('*t',s.start); local b=os.date('*t',s.finish or s.start)
-          local days=math.floor((os.time{year=b.year,month=b.month,day=b.day,hour=12}-os.time{year=a.year,month=a.month,day=a.day,hour=12})/86400+0.5)
-          local template=copy(form); template.enddays=days
-          state.templates[#state.templates+1]=template; state.revision=state.revision+1; error='Template saved.'
-        end
-      end
-    end
     local preview=Core.make(form)
     r.ImGui_Separator(ctx)
     if preview then
