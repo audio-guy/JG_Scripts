@@ -1,154 +1,124 @@
-# Recording Scheduler 2.1
+# Recording Scheduler 2.2
 
-## Purpose and product decisions
+## Purpose
 
 For unattended audio recordings and attended live capture, not studio workflows.
-The scheduler must not depend on window visibility. A missed or unverified recording
-must never be presented as completed. User slot names are preserved verbatim.
-All generated slot folder/marker/tag names use **YYMMDD - HHMM Name**, for example
-`261102 - 1930 Konzert`. The date/time is the planned start, not the pre-roll start.
-Only the filesystem-derived name replaces invalid filename characters.
+The main view stays focused on the schedule. Each slot has direct start/end times
+and always records into its own subfolder. No repetition, pre/post-roll controls,
+continuous/shared-folder mode or confirmation checklist.
 
-## Installation
+## Installation and use
 
-Load `Tools/JG_Recording_Scheduler.lua` through REAPER's Actions list. Requires
-ReaImGui 0.10 or newer (available through ReaPack). SWS is not required by this version.
-Close any running older scheduler before launching the new one. Version 1 kept its
-plan only in memory, so there is no saved v1 plan to import.
+Load `Tools/JG_Recording_Scheduler.lua` in REAPER's Actions list. Requires ReaImGui
+0.10 or newer. The optional js_ReaScriptAPI extension supplies the native folder
+picker; without it, the destination can still be entered manually.
 
-The development installation can point existing action paths to this file with a
-symbolic link. The repository file is the maintained source. This version is not
-added to the public ReaPack index until a release is explicitly requested.
+1. Save the project and arm the intended audio input tracks.
+2. In **Setup**, choose the recording destination with **Choose folder...**.
+   **Use project folder** uses the effective project recording path instead.
+3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
+   For overnight recordings, enter the next end date. **Open-ended recording**
+   explicitly leaves the end to a manual stop.
+4. Select **Enable schedule**. Use Duplicate to add another similar slot.
+
+Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
+for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
+Overlaps are rejected without changing the existing plan.
+
+## Recording destination
+
+The selected folder is the parent; each slot creates a subfolder inside it:
+
+```text
+Selected recording folder/
+  261102 - 1930 Concert/
+  261102 - 2100 Encore/
+```
+
+Folder, marker and recording-tag names follow **YYMMDD - HHMM Name**. User names
+are kept verbatim in the plan. Only derived filesystem names replace forbidden
+characters. A manually entered root can be absolute or relative to the saved
+project directory. Cancelling the native folder dialog preserves the previous root.
+Existing slot directories are reused; REAPER supplies unique audio filenames.
+
+Each slot stops and the next starts, even when adjacent. This can leave an audio
+gap. Use one longer slot for uninterrupted event capture. The previous continuous
+mode is no longer used, including when loading older plans.
+
+The slot name is also supplied through REAPER's `$rectag` wildcard. To include it
+in individual audio filenames, add `$rectag` to REAPER's recording filename pattern.
+The script does not change global naming preferences.
 
 ## Interface
 
-The main view opens on **Schedule**. A persistent header shows recording state,
-the next slot/countdown and the enable/stop controls. Project, armed-track count
-and recording mode remain visible across all three views.
+- **Schedule:** next recording/countdown, transport controls and scrollable plan.
+  Select a row for Edit, Duplicate or Delete. Completed/stopped entries are hidden
+  initially; failures remain visible. Show history reveals past entries.
+- **Slot editor:** name, dates and times, with optional templates in a collapsed
+  section. Save returns to the plan; Cancel discards the draft. Switching views
+  preserves the draft and prevents enabling until it is saved or cancelled.
+- **Setup:** recording folder and optional recording help.
+- **Activity:** all events and verified file paths, newest first; Export log writes
+  `<project>.rpp.recording-log.tsv` and replaces the previous export.
 
-- **Schedule:** a scrollable table with fixed headers and separate date, start,
-  end, length and status columns. Select a row for Edit, Duplicate and Delete.
-  Completed/stopped history is hidden initially; failed/missed/partial entries
-  stay visible. Expand Selected slot details for the recording window and folder.
-- **Add slot / Edit selected:** opens an inline editor in place of the table.
-  Dates and times are paired; repetition, margins and templates are collapsed
-  until needed. Save returns to the plan; Cancel discards the draft. Switching
-  views retains an unfinished draft and prevents enabling until it is resolved.
-- **Setup:** destination, recording mode and four explicit operator checks.
-- **Activity:** all events, newest first, with a log export button.
+Plan changes are locked during enabled scheduling or an active recording. Disable
+future starts before editing. The active end can be extended by five minutes if it
+does not conflict with another slot. Undo restores the last plan/template change.
+Disable schedule leaves an active recording's scheduled stop intact. Stop recording
+stops the owned recording and disables future starts. Closing while enabled/active
+asks whether to stop and close or keep running.
 
-The interface uses 16 px text, consistent control spacing and keyboard navigation.
-Scheduling remains independent of the selected view and window visibility.
+## Readiness and limitations
 
-## Before enabling
+The automatic check verifies the saved/selected project, stopped transport, armed
+audio-input tracks, open audio device, and disabled looping. Destination folders
+are write-tested on enabling and again at each actual start. Existing manual
+recordings are never taken over. Recording appends after existing project content.
 
-1. Save the REAPER project and arm the intended audio input tracks.
-2. Use normal project recording mode and `Record: input` on each armed track.
-3. Disable recording-length limits, count-in/pre-roll in REAPER, and looping.
-4. Configure REAPER to retain recorded files without a confirmation dialog.
-5. Check audio routing, gain, available disk space and power. Prevent system sleep.
-6. Confirm the setup in the scheduler. This is an operator check, not an automatic
-   guarantee of the project's recording settings, disk capacity or signal quality.
-7. Add future slots and explicitly select **Enable schedule**.
+There are no mandatory confirmation checkboxes. The operator still needs normal
+record mode, no recording-length limit/count-in, automatic retention of recorded
+files, correct routing/levels, sufficient disk space and a computer that stays awake.
+Those conditions are explained under Recording help; they are not all measured
+by the script. Writing a small probe file does not reserve disk space.
 
-The automatic readiness check verifies a saved/selected project, stopped transport,
-at least one armed audio-input track, an open audio device and disabled looping.
-All planned target folders are created and write-tested when enabling, and the
-actual target is checked again at recording start. It does not reserve disk space.
-Tracks/routing are read at each start; keep the intended tracks armed throughout.
+The scheduler is bound to its original project. Changing project tabs disables
+future starts; an owned recording keeps its scheduled stop in the original project.
+Window visibility and selected GUI view do not affect scheduling.
 
-The scheduler binds to the project in which it was opened. Switching project tabs
-disables future starts. An owned recording still retains its scheduled stop in its
-original project. Existing manual recordings are never taken over.
+Timing uses system wall time and REAPER's deferred loop, not an audio-thread clock.
+Blocking dialogs, sleep, crashes and device failures can interrupt automation.
+Starts over five seconds late are missed; late stops or clock changes require review.
 
-## Recording folders and continuous live capture
+## Persistence and migration
 
-The blank root setting uses the project's effective recording path. A custom root
-may be absolute or relative to the saved project directory. Each slot's generated
-subfolder is `YYMMDD - HHMM Name`. The final path is shown during recording and in
-the activity log. Folder names are generated, not arbitrary paths supplied by slot
-names. Existing folders are reused; REAPER remains responsible for unique audio
-filenames. The slot name is also exposed as REAPER's `$rectag` wildcard. To include
-it in individual audio filenames, configure `$rectag` in REAPER's recording filename
-pattern; this script does not change global filename preferences.
+Plans, templates and logs are stored in project extstate and an immediate recovery
+sidecar, `<project>.rpp.jg-scheduler`. Save the project normally to embed the extstate;
+keep the sidecar with the project. Failed recovery-file writes disable future starts.
+Corrupt data is preserved for recovery instead of overwritten.
 
-- **Separate recordings (default):** one folder per slot; each slot stops and the
-  next starts. This transition can leave a gap. Do not use it for uninterrupted
-  event capture.
-- **Continuous live recording:** exactly adjacent recording windows remain in one
-  uninterrupted transport recording, in the **first slot's folder**. Later slots
-  create markers rather than new audio files. Final verification happens after the
-  entire continuous session stops. A real gap between slots ends the session.
+Reopening always leaves scheduling disabled. Previously active slots become
+Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
+with pre/post-roll are converted to visible direct start/end times, preserving the
+actual recording window including seconds. Completed history retains its original
+times. Duplicating legacy history or applying an old template exposes its effective
+times in the editor rather than silently applying hidden margins.
 
-Adjacency and conflicts include pre-roll and post-roll. Overlapping windows are
-rejected with the affected names; the previous destructive Merge/Trim shortcuts
-were removed. Adjust the displayed times or use a single longer slot.
-
-The script temporarily changes only the target project's recording path and tag,
-then restores the previous values after stopping. If an external edit changes those
-settings during recording, that change is preserved. Recordings append at the later
-of the edit cursor and existing project end, avoiding wall-clock seeks into media.
-
-## Planning and live operation
-
-- Dates: `YYMMDD` (also accepts `YYYY-MM-DD`). Times: `HH:MM` or `HHMM`.
-- End date is explicit, including overnight recordings. End must follow start.
-- **Open-ended recording** is an explicit option and requires a manual stop.
-- Pre-roll/post-roll: whole seconds from 0 to 3600.
-- Repetition: 1–100 occurrences, daily or weekly at the same local time.
-- Ambiguous/nonexistent daylight-saving times are rejected, including repetitions.
-- Duplicate an existing slot, choose a new time and save.
-- Templates preserve the slot name, times, margins and end-day offset in this project.
-- Disable future starts before changing the plan. Active slots cannot be deleted or
-  edited. Their end can be extended by five minutes if no future slot conflicts.
-- One-level undo restores the last add/edit/delete/template change.
-- **Disable schedule** (or **Disable future starts** while recording) leaves an active recording's stop time intact.
-- **Stop recording** ends the owned recording immediately.
-- Closing an active/enabled scheduler asks explicitly to stop and close or keep running.
-  Terminating the script also attempts to stop only its own recording and restore settings.
-
-## Persistence and results
-
-Plans/templates/logs are stored in project extstate and immediately in a
-`<project>.rpp.jg-scheduler` recovery file next to the saved project. Save the REAPER
-project normally to embed current extstate; the sidecar preserves more recent plan
-changes independently. Keep the sidecar with the project. Saves use a temporary file
-and rename; a failed save disables future starts and reports the error. Corrupt data
-is not overwritten automatically.
-
-Reopening always leaves scheduling disabled. Previously active entries become
-**Interrupted**, not completed. Review their files before duplicating/rescheduling.
-There is no autonomous restart of REAPER or recovery from a machine crash.
+## Results
 
 | Status | Meaning |
 |---|---|
-| Scheduled | Planned; only starts when the schedule is enabled |
-| Recording | Active, or part of a continuous session awaiting final verification |
-| Completed | Transport ran and new nonempty files with positive source duration were found in the target folder on every expected track |
-| Partial | Files found, but timing was late or the system clock changed; inspect the result |
-| Stopped | A recording ended through manual intervention or script closure |
-| Missed | The start was more than five seconds late, or its entire window elapsed |
-| Failed | Start or file verification failed; inspect the project and disk |
-| Interrupted | A previous scheduler session ended without a verified result |
+| Scheduled | Planned; only starts when enabled |
+| Recording | The slot is recording |
+| Completed | New nonempty files with positive source duration found on every expected track |
+| Partial | Files found, but timing was late or the system clock changed |
+| Stopped | Recording stopped through manual intervention or script closure |
+| Missed | Start more than five seconds late, or entire window elapsed |
+| Failed | Start or file verification failed |
+| Interrupted | Previous scheduler session ended without a verified result |
 
-Completion does **not** verify signal, audible content, full duration, absence of
-underruns or file integrity. Pre-existing files and unrelated new files outside the
-slot folder are excluded from verification. In continuous mode verification covers
-the whole transport session, not an individual file per slot. The activity log lists
-confirmed new file paths. The Activity view and export include all events.
-
-**Export log** writes `<project>.rpp.recording-log.tsv`, replacing a previous
-export for that project. The versioned text format escapes tabs/newlines/percent
-characters in user content rather than executing stored data.
-
-## Timing and host limitations
-
-Timing uses system wall time and REAPER's deferred script loop, not an audio-thread
-or sample-accurate clock. A blocked REAPER UI, modal dialog, sleep, crash or audio
-hardware failure can interrupt automation. Starts over five seconds late are marked
-missed. Small delays and late stops are recorded as partial results. System-clock
-jumps disable future starts and flag active timing for review; active stops retain
-their wall-clock deadline. Test your exact host settings before an unattended event.
+Completed does not verify signal quality, full duration, underruns or file integrity.
+Pre-existing files and new files outside the slot folder do not count as success.
+Inspect and listen to recordings before treating their audio as verified.
 
 ## Verification
 
@@ -158,15 +128,10 @@ TZ=Europe/Berlin lua tests/recording_scheduler_host_test.lua
 luac -p Tools/JG_Recording_Scheduler.lua
 ```
 
-Tests run real parsing, storage, state-machine, adapter and window-loop code with a
-mock REAPER host. They cover malformed dates, DST, overlap/recurrence, persistence,
-missed/failed starts, ownership, close/stop behavior, continuous vs separate sessions,
-folder restoration and file verification. They do not replace a real audio session.
+The tests use the real parser, state machine, storage, adapter and GUI loop with a
+mock REAPER host. They cover timing, migration, dedicated folders, ownership,
+file verification, cancelled edits and native picker selection/cancellation/errors.
+A real audio test remains necessary before unattended use.
 
-Manual acceptance before unattended use: a short test with two slots in each mode,
-window collapsed, one deliberate manual stop, one restart/recovery and project tab
-switch; verify file destinations, recorded duration and audio on every intended track.
-
-API reference: [REAPER ReaScript documentation](https://www.reaper.fm/sdk/reascript/reascripthelp.html),
-particularly `Main_OnCommandEx`, `OnStopButtonEx`, `GetPlayStateEx`, `GetProjectPathEx`,
-`GetSetProjectInfo_String` (`RECORD_PATH`, `RECTAG`) and project extstate.
+References: [REAPER ReaScript API](https://www.reaper.fm/sdk/reascript/reascripthelp.html)
+and [js_ReaScriptAPI dialog definitions](https://github.com/juliansader/ReaExtensions/blob/master/js_ReaScriptAPI/Source%20code/js_ReaScriptAPI_def.h).

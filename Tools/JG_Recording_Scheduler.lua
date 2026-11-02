@@ -1,22 +1,22 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.1.0
+-- @version 2.2.0
 -- @changelog
---   Streamlined Schedule, Setup and Activity views with an on-demand slot editor.
---   Project-bound scheduling, persistent plans, explicit activation and verified results.
---   Strict time validation, pre/post-roll, repeat/duplicate/templates and activity export.
---   Dedicated slot folders named YYMMDD - HHMM Name; continuous live recording mode.
+--   Simplify slots to direct start/end times; remove repetition and confirmation checklists.
+--   Always record each slot into its own YYMMDD - HHMM Name subfolder.
+--   Add a native folder picker (requires js_ReaScriptAPI for the dialog).
 -- @about
 --   For unattended audio recordings and attended live capture. Requires ReaImGui 0.10+.
 --   Save the project first. Prepare audio inputs, normal record mode, no record length
 --   limit, and automatic retention of recorded files. Keep REAPER running and prevent sleep.
---   Separate mode uses a stop/start between slots; continuous mode keeps adjacent slots
---   in the first slot's folder. Timing is wall-clock/defer based, not sample accurate.
+--   Each slot uses its own folder and a stop/start transition, which can leave a gap.
+--   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
 local function trim(s) return (s or ''):match('^%s*(.-)%s*$') end
+local function clocktime(t) return os.date(t%60==0 and '%H:%M' or '%H:%M:%S',t) end
 local function stamp(t) return t and os.date('%y%m%d - %H%M', t) or '' end
 local function encode(s) return tostring(s or ''):gsub('[%%\t\r\n]', function(c) return string.format('%%%02X',c:byte()) end) end
 local function decode(s) return (s:gsub('%%(%x%x)', function(c) return string.char(tonumber(c,16)) end)) end
@@ -28,18 +28,20 @@ local function finite(n) return type(n)=='number' and n==n and math.abs(n)<1e12 
 function Core.datetime(date, time)
   local y,m,d = date:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)$')
   if not y then y,m,d=date:match('^(%d%d)(%d%d)(%d%d)$'); if y then y=2000+tonumber(y) end end
-  local h,n=time:match('^(%d%d):(%d%d)$')
+  local h,n,sec=time:match('^(%d%d):(%d%d):(%d%d)$')
+  if not h then h,n=time:match('^(%d%d):(%d%d)$') end
+  sec=tonumber(sec) or 0
   if not h then h,n=time:match('^(%d%d)(%d%d)$') end
   y,m,d,h,n=tonumber(y),tonumber(m),tonumber(d),tonumber(h),tonumber(n)
-  if not y or not h or y<2000 or y>2099 or m<1 or m>12 or d<1 or d>31 or h>23 or n>59 then
+  if not y or not h or y<2000 or y>2099 or m<1 or m>12 or d<1 or d>31 or h>23 or n>59 or sec>59 then
     return nil,'Enter a valid date (YYMMDD) and time (HH:MM or HHMM).'
   end
   local matches={}
   for _,dst in ipairs({false,true}) do
-    local ok,t=pcall(os.time,{year=y,month=m,day=d,hour=h,min=n,sec=0,isdst=dst})
+    local ok,t=pcall(os.time,{year=y,month=m,day=d,hour=h,min=n,sec=sec,isdst=dst})
     if ok and t then
       local v=os.date('*t',t)
-      if v.year==y and v.month==m and v.day==d and v.hour==h and v.min==n then matches[t]=true end
+      if v.year==y and v.month==m and v.day==d and v.hour==h and v.min==n and v.sec==sec then matches[t]=true end
     end
   end
   local result,count=nil,0; for t in pairs(matches) do result=t; count=count+1 end
@@ -67,11 +69,7 @@ function Core.make(form)
     if not finish then return nil,'End: '..err end
     if finish<=start then return nil,'End must be after start. For overnight recordings, enter the next date.' end
   end
-  local pre,post=tonumber(form.pre or '0'),tonumber(form.post or '0')
-  if not finite(pre) or not finite(post) or pre<0 or post<0 or pre>3600 or post>3600 or pre%1~=0 or post%1~=0 then
-    return nil,'Pre-roll and post-roll must be whole seconds from 0 to 3600.'
-  end
-  return {id=0,name=form.name,start=start,finish=finish,pre=pre,post=post,status='Scheduled',note='',actual_start=nil,actual_end=nil,folder=''}
+  return {id=0,name=form.name,start=start,finish=finish,pre=0,post=0,status='Scheduled',note='',actual_start=nil,actual_end=nil,folder=''}
 end
 function Core.conflict(slots)
   local pending={}
@@ -81,25 +79,6 @@ function Core.conflict(slots)
     local _,lastend=Core.bounds(pending[i-1]); local start=Core.bounds(pending[i])
     if not lastend or start<lastend then return pending[i-1],pending[i] end
   end
-end
-function Core.repeat_slots(s, count, days)
-  if not count or count%1~=0 or count<1 or count>100 then return nil,'Repeat count must be 1 to 100.' end
-  if days~=1 and days~=7 then return nil,'Repeat interval must be daily or weekly.' end
-  if count>1 and not s.finish then return nil,'Repeating slots need an end time.' end
-  local result={}
-  for i=0,count-1 do
-    local n=copy(s)
-    for _,key in ipairs({'start','finish'}) do
-      if s[key] then
-        local t=os.date('*t',s[key]); local normalized=os.time{year=t.year,month=t.month,day=t.day+i*days,hour=12}
-        local value,err=Core.datetime(os.date('%y%m%d',normalized),os.date('%H:%M',s[key]))
-        if not value then return nil,err end
-        n[key]=value
-      end
-    end
-    result[#result+1]=n
-  end
-  return result
 end
 function Core.new()
   return {slots={},log={},templates={},next_id=1,enabled=false,mode='separate',root='',revision=0}
@@ -115,7 +94,7 @@ function Core.apply(state, additions, replace_id)
   end
   for _,s in ipairs(additions) do nextslots[#nextslots+1]=copy(s) end
   local a,b=Core.conflict(nextslots)
-  if a then return nil,'Overlap (including pre/post-roll): '..a.name..' / '..b.name..'. Adjust the times before saving.' end
+  if a then return nil,'Overlap: '..a.name..' / '..b.name..'. Adjust the times before saving.' end
   local nextid=state.next_id
   for i=#nextslots-#additions+1,#nextslots do
     nextslots[i].id=nextid; nextid=nextid+1
@@ -127,7 +106,7 @@ end
 
 -- A versioned, escaped data format; never execute stored project data as Lua.
 function Core.serialize(st)
-  local out={row('JG_RECORDING_SCHEDULER',2),row('P',st.mode,st.root,st.next_id,st.revision)}
+  local out={row('JG_RECORDING_SCHEDULER',2),row('P','separate',st.root,st.next_id,st.revision)}
   for _,s in ipairs(st.slots) do out[#out+1]=row('S',s.id,s.name,s.start,s.finish or '',s.pre,s.post,s.status,s.note,s.actual_start or '',s.actual_end or '',s.folder or '') end
   for _,e in ipairs(st.log) do out[#out+1]=row('L',e.time,e.message) end
   for _,t in ipairs(st.templates) do out[#out+1]=row('T',t.name,t.start,t.finish,t.open and '1' or '0',t.pre,t.post,t.enddays or 0) end
@@ -144,11 +123,16 @@ function Core.deserialize(text)
       first=false
     elseif f[1]=='P' then
       if f[2]~='separate' and f[2]~='continuous' then return nil,'Invalid recording mode in saved plan.' end
-      st.mode,st.root,st.next_id,st.revision=f[2],f[3],tonumber(f[4]),tonumber(f[5])
+      st.mode,st.root,st.next_id,st.revision='separate',f[3],tonumber(f[4]),tonumber(f[5])
       if not finite(st.next_id) or st.next_id<1 or not finite(st.revision) then return nil,'Invalid plan metadata.' end
     elseif f[1]=='S' then
       local s={id=tonumber(f[2]),name=f[3],start=tonumber(f[4]),finish=tonumber(f[5]),pre=tonumber(f[6]),post=tonumber(f[7]),status=f[8],note=f[9],actual_start=tonumber(f[10]),actual_end=tonumber(f[11]),folder=f[12]}
       if #f~=12 or not finite(s.id) or s.id%1~=0 or ids[s.id] or not finite(s.start) or not finite(s.pre) or not finite(s.post) or s.pre<0 or s.post<0 or s.pre>3600 or s.post>3600 or not statuses[s.status] or (f[5]~='' and (not finite(s.finish) or s.finish<=s.start)) then return nil,'Invalid slot in saved plan.' end
+      -- Preserve effective times from older plans while removing hidden margins.
+      if s.status=='Scheduled' and (s.pre~=0 or s.post~=0) then
+        s.start,s.finish=Core.bounds(s); s.pre,s.post=0,0
+        s.note='Previous pre/post-roll included in the displayed start/end times.'
+      end
       ids[s.id]=true; st.next_id=math.max(st.next_id,s.id+1)
       st.slots[#st.slots+1]=s
     elseif f[1]=='L' and tonumber(f[2]) then st.log[#st.log+1]={time=tonumber(f[2]),message=f[3]}
@@ -211,7 +195,7 @@ function Engine:extend(now,seconds)
   local proposed=copy(self.active); proposed.finish=proposed.finish+seconds; proposed.status='Scheduled'
   local check={proposed}
   for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then check[#check+1]=s end end
-  if Core.conflict(check) then return nil,'Extension overlaps a later slot (including pre/post-roll).' end
+  if Core.conflict(check) then return nil,'Extension overlaps a later slot.' end
   self.active.finish=proposed.finish
   self:log(now,'Recording extended to '..stamp(proposed.finish)..'.')
   return true
@@ -238,17 +222,6 @@ function Engine:tick(now,mono)
     end
     local _,ending=Core.bounds(s)
     if ending and now>=ending then
-      local nextslot
-      if self.state.enabled and self.state.mode=='continuous' then
-        for _,n in ipairs(self.state.slots) do if n.status=='Scheduled' and Core.bounds(n)==ending then nextslot=n; break end end
-      end
-      if nextslot and (not nextslot.finish or now<nextslot.finish+nextslot.post) then
-        s.actual_end=now; s.status='Recording'; s.note=s.note or ''
-        nextslot.status='Recording'; nextslot.actual_start=now; nextslot.folder=s.folder
-        if now-ending>2 then nextslot.note='Slot boundary processed late; continuous audio retained.' end
-        self.session[#self.session+1]=nextslot; self.active=nextslot
-        self.host:marker(nextslot); self:log(now,Core.folder(nextslot)..': continuous boundary; files remain in '..s.folder)
-      else
         self.host:stop()
         if self.host:recording() then
           if not self.stop_warning then self:disable(now,'Automatic stop failed. Use REAPER transport.'); self.stop_warning=true end
@@ -256,7 +229,6 @@ function Engine:tick(now,mono)
         end
         if now-ending>2 then s.note='Automatic stop was late by '..(now-ending)..' seconds.' end
         self:finalize(now,'Completed','')
-      end
     end
   end
   if self.state.enabled and not self.active then
@@ -294,7 +266,7 @@ function Engine:tick(now,mono)
 end
 
 local Host={}; Host.__index=Host
-function Host.new(api,project) return setmetatable({r=api,project=project,baseline={},expected={},saved=nil,confirmed=false},Host) end
+function Host.new(api,project) return setmetatable({r=api,project=project,baseline={},expected={},saved=nil},Host) end
 function Host:valid() return self.r.ValidatePtr(self.project,'ReaProject*') end
 function Host:selected() return self.r.EnumProjects(-1,'')==self.project end
 function Host:project_file()
@@ -325,7 +297,6 @@ function Host:preflight(enabling)
   local device=r.GetAudioDeviceInfo('SRATE')
   if not device then return nil,'The audio device is not open.' end
   if r.GetSetRepeatEx(self.project,-1)~=0 then return nil,'Disable loop/repeat before enabling the schedule.' end
-  if not self.confirmed then return nil,'Complete the recording setup confirmation below.' end
   if self.storage_error then return nil,self.storage_error end
   return true
 end
@@ -354,6 +325,16 @@ function Host:prepare(state)
   end
   return true
 end
+function Host:choose_folder(root)
+  if not self.r.JS_Dialog_BrowseForFolder then
+    return nil,'Install js_ReaScriptAPI via ReaPack to use the folder picker, or enter a path manually.'
+  end
+  local result,path=self.r.JS_Dialog_BrowseForFolder('Choose recording folder',self:root_path(root))
+  if result==1 and path and path~='' then return path end
+  if result==0 then return nil end -- Cancel preserves the current destination.
+  return nil,'The folder dialog could not be opened. Enter the path manually.'
+end
+
 function Host:source_map()
   local files,lengths={},{}
   for _,track in ipairs(self.expected) do
@@ -447,7 +428,7 @@ local function run(r)
   local engine=Engine.new(state,host)
   local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
-  local editing=nil; local error=loaderr or ''; local count='1'; local weekly=false; local template_index=1
+  local editing=nil; local error=loaderr or ''; local template_index=1
   local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
   local undo=nil
   local function save()
@@ -469,13 +450,14 @@ local function run(r)
     sidecar=file~='' and file..'.jg-scheduler' or nil
   end
   local function snapshot() undo=Core.serialize(state) end
-  local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; count='1'; error='' end
+  local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not state.enabled and not engine.active end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
   local function edit(s,duplicate)
     editing=not duplicate and s.id or nil
-    form={date=os.date('%y%m%d',s.start),start=os.date('%H:%M',s.start),enddate=os.date('%y%m%d',s.finish or s.start),finish=s.finish and os.date('%H:%M',s.finish) or '',name=s.name,open=not s.finish,pre=tostring(s.pre),post=tostring(s.post)}
-    count='1'; error=duplicate and 'Choose a new date/time for this duplicate.' or ''
+    s=copy(s); s.start,s.finish=Core.bounds(s); s.pre,s.post=0,0
+    form={date=os.date('%y%m%d',s.start),start=clocktime(s.start),enddate=os.date('%y%m%d',s.finish or s.start),finish=s.finish and clocktime(s.finish) or '',name=s.name,open=not s.finish,pre=tostring(s.pre),post=tostring(s.post)}
+    error=duplicate and 'Choose a new date/time for this duplicate.' or ''
   end
   local function export()
     local file=host:project_file(); if file=='' then error='Save the project first.'; return end
@@ -491,7 +473,6 @@ local function run(r)
   local view='Schedule'
   local editor_open=false
   local selected_id=nil
-  local setup_checks={false,false,false,false}
   local function duration(seconds)
     seconds=math.max(0,math.floor(seconds))
     return string.format('%02d:%02d:%02d',seconds//3600,(seconds%3600)//60,seconds%60)
@@ -520,14 +501,11 @@ local function run(r)
   local function commit_form(now)
     local s,err=Core.make(form)
     if s then
-      local additions; additions,err=Core.repeat_slots(s,editing and 1 or tonumber(count),weekly and 7 or 1)
-      if additions then
-        if Core.bounds(additions[1])<=now then err='Start including pre-roll must be in the future.'
-        else
-          snapshot()
-          local ok; ok,err=Core.apply(state,additions,editing)
-          if ok then selected_id=state.next_id-#additions; clear_form(); editor_open=false end
-        end
+      if s.start<=now then err='Start must be in the future.'
+      else
+        snapshot()
+        local ok; ok,err=Core.apply(state,{s},editing)
+        if ok then selected_id=state.next_id-1; clear_form(); editor_open=false end
       end
     end
     error=err or ''
@@ -548,19 +526,6 @@ local function run(r)
     end
     local changed,value=r.ImGui_Checkbox(ctx,'Open-ended recording (manual stop)',form.open)
     if changed then form.open=value end
-    if r.ImGui_CollapsingHeader(ctx,'Pre-roll, post-roll and repetition') then
-      if r.ImGui_BeginTable(ctx,'Slot options',2,r.ImGui_TableFlags_SizingStretchSame()) then
-        r.ImGui_TableNextRow(ctx)
-        r.ImGui_TableNextColumn(ctx); field('Pre-roll  /  seconds','pre')
-        r.ImGui_TableNextColumn(ctx); field('Post-roll  /  seconds','post')
-        r.ImGui_EndTable(ctx)
-      end
-      if not editing then
-        r.ImGui_SetNextItemWidth(ctx,120)
-        changed,value=r.ImGui_InputText(ctx,'Occurrences (1-100)',count); if changed then count=value end
-        changed,value=r.ImGui_Checkbox(ctx,'Repeat weekly instead of daily',weekly); if changed then weekly=value end
-      end
-    end
     if r.ImGui_CollapsingHeader(ctx,'Templates') then
       if #state.templates>0 then
         local names={}; for _,t in ipairs(state.templates) do names[#names+1]=t.name end
@@ -575,6 +540,17 @@ local function run(r)
             local d=os.date('*t',date)
             form.enddate=os.date('%y%m%d',os.time{year=d.year,month=d.month,day=d.day+t.enddays,hour=12})
           end
+          local start=Core.datetime(form.date,form.start)
+          local finish=not form.open and Core.datetime(form.enddate,form.finish) or nil
+          if start then
+            start=start-(tonumber(t.pre) or 0)
+            form.date,form.start=os.date('%y%m%d',start),clocktime(start)
+          end
+          if finish then
+            finish=finish+(tonumber(t.post) or 0)
+            form.enddate,form.finish=os.date('%y%m%d',finish),clocktime(finish)
+          end
+          form.pre,form.post='0','0'
         end
       else muted('No templates saved in this project.') end
       if r.ImGui_Button(ctx,'Save form as template') then
@@ -607,37 +583,22 @@ local function run(r)
     r.ImGui_SetNextItemWidth(ctx,-1)
     local changed,value=r.ImGui_InputText(ctx,'##recording_root',state.root)
     if changed then state.root=value; state.revision=state.revision+1 end
+    if r.ImGui_Button(ctx,'Choose folder...') then
+      local path,err=host:choose_folder(state.root)
+      if path then state.root=path; state.revision=state.revision+1; error='' elseif err then error=err end
+    end
+    r.ImGui_SameLine(ctx)
+    if r.ImGui_Button(ctx,'Use project folder') then state.root=''; state.revision=state.revision+1; error='' end
     muted('Leave blank to use the project recording path.')
     text(host:root_path(state.root))
     r.ImGui_Separator(ctx)
-    text('Between slots')
-    local mode=state.mode=='continuous' and 1 or 0
-    r.ImGui_SetNextItemWidth(ctx,-1)
-    changed,value=r.ImGui_Combo(ctx,'##recording_mode',mode,'Separate recordings / one folder per slot\0Continuous live recording / shared folder\0')
-    if changed then state.mode=value==1 and 'continuous' or 'separate'; state.revision=state.revision+1 end
-    text(state.mode=='continuous'
-      and 'Adjacent slots stay in one uninterrupted recording. All files remain in the first slot folder; each slot adds a marker.'
-      or 'Each slot gets its own folder. Stop/start between slots can leave an audio gap.')
-    r.ImGui_Separator(ctx)
-    text('Before enabling')
-    local labels={
-      'Normal record mode; no recording limit or count-in',
-      'Recorded files are kept without a confirmation dialog',
-      'Inputs, levels and available disk space checked',
-      'Computer stays awake; REAPER remains running',
-    }
-    for i,label in ipairs(labels) do
-      changed,value=r.ImGui_Checkbox(ctx,label,setup_checks[i])
-      if changed then
-        setup_checks[i]=value; host.confirmed=true
-        for _,checked in ipairs(setup_checks) do host.confirmed=host.confirmed and checked end
-        last_check=0
-      end
-    end
-    muted('These checks are confirmed by you, not measured by the scheduler.')
+    text('Each slot creates its own subfolder: YYMMDD - HHMM Name.')
+    muted('Stop/start between slots can leave a gap. Use one long slot for uninterrupted capture.')
     r.ImGui_EndDisabled(ctx)
+    if error~='' then text(error) end
     if not editable() then text('Disable future starts and finish the active recording to change setup.') end
-    if r.ImGui_CollapsingHeader(ctx,'Timing and recovery') then
+    if r.ImGui_CollapsingHeader(ctx,'Recording help') then
+      text('Use normal recording mode with no limit/count-in, and keep recorded files without a confirmation dialog. Check inputs, levels and disk space.')
       text('Keep REAPER running. Scheduling follows the system clock and is not sample accurate. A late start may be missed.')
       text('Plans are saved with this project and in a recovery sidecar. After reopening, explicitly enable the schedule again.')
       text('Completed means new files were found on every expected track. Check the audio before treating a recording as verified.')
@@ -679,8 +640,8 @@ local function run(r)
           r.ImGui_TableNextColumn(ctx)
           if r.ImGui_Selectable(ctx,s.name..'##slot',selected_id==s.id,r.ImGui_SelectableFlags_SpanAllColumns()) then selected_id=s.id end
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%y%m%d',s.start))
-          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%H:%M',s.start))
-          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and os.date('%H:%M',s.finish) or 'Open')
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,clocktime(s.start))
+          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and clocktime(s.finish) or 'Open')
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and duration(s.finish-s.start) or '--')
           r.ImGui_TableNextColumn(ctx); status(s.status)
           r.ImGui_PopID(ctx)
@@ -712,7 +673,6 @@ local function run(r)
         text('Folder: '..(selected.folder~='' and selected.folder or Core.folder(selected)))
         local begin,ending=Core.bounds(selected)
         text('Recording window: '..stamp(begin)..' to '..(ending and stamp(ending) or 'manual stop'))
-        text('Pre-roll: '..selected.pre..' s  /  Post-roll: '..selected.post..' s')
       end
     else muted('Select a slot to edit, duplicate or inspect its details.') end
     if not editable() then muted('Plan editing is locked while the schedule is enabled or recording.') end
@@ -780,7 +740,7 @@ local function run(r)
         r.ImGui_EndTable(ctx)
       end
       local project_name=r.GetProjectName(project,'')
-      muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks  /  '..(state.mode=='continuous' and 'Continuous live' or 'Separate slots'))
+      muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       if not engine.active and not ready then text(readiness) end
       if loaderr then text(loaderr) end
       if host.storage_error then text(host.storage_error) end

@@ -30,7 +30,7 @@ local function rig()
     OnStopButtonEx=function(project) eq(project,p); rec=false; stopped=stopped+1 end,
     AddProjectMarker2=function(project) eq(project,p) end, GetPlayPositionEx=function(project) eq(project,p); return 100 end,
   }
-  local h=H.new(api,p); h.confirmed=true
+  local h=H.new(api,p)
   return h,api,cfg,sources,commands,function() selected=other end,function() return stopped end
 end
 local function slot(name)
@@ -61,6 +61,15 @@ test('adapter rejects disconnected device, loops and MIDI inputs',function()
   local h,api=rig(); api.GetAudioDeviceInfo=function() return false,'' end; assert(not h:preflight()); api.GetAudioDeviceInfo=function() return true,'48000' end
   api.GetSetRepeatEx=function() return 1 end; assert(not h:preflight()); api.GetSetRepeatEx=function() return 0 end
   api.GetMediaTrackInfo_Value=function(_,k) return k=='I_RECARM' and 1 or (k=='I_RECINPUT' and 4096 or 0) end; assert(not h:preflight())
+end)
+test('native folder picker selects, cancels and reports missing extension',function()
+  local h,api=rig(); local path,err=h:choose_folder(''); eq(path,nil); assert(err:find('js_ReaScriptAPI'))
+  api.JS_Dialog_BrowseForFolder=function(title,initial) eq(initial,root); return 1,root..'/Selected folder' end
+  eq(h:choose_folder(''),root..'/Selected folder')
+  api.JS_Dialog_BrowseForFolder=function() return 0,'' end
+  path,err=h:choose_folder(''); eq(path,nil); eq(err,nil)
+  api.JS_Dialog_BrowseForFolder=function() return -1,'' end
+  path,err=h:choose_folder(''); eq(path,nil); assert(err)
 end)
 test('write failure prevents start',function()
   local h,api,cfg,sources,commands=rig(); h.writable=function() return nil,'Disk unavailable' end; assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
@@ -139,7 +148,7 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     frame('Add slot',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
     local f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); local saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture')
-    frame(nil,nil,'Setup'); assert(shown['##recording_root'] and not shown['##name'])
+    frame(nil,nil,'Setup'); assert(shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
     frame(nil,nil,'Activity'); assert(shown['Export log'] and not shown['##recording_root'])
     frame(nil,nil,'Schedule'); assert(shown['Add slot'] and not shown['##name'])
     frame(nil,nil,'Future capture##slot'); frame('Edit selected'); frame()

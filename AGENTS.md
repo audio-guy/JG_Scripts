@@ -21,12 +21,15 @@
 
 - Target unattended recordings and attended live capture, not studio workflows.
 - Generated slot folder, marker and recording-tag names use `YYMMDD - HHMM Name`.
-  Use the planned slot start even when pre-roll is enabled; preserve user names in data.
+  Use the slot start; preserve user names in data.
 - Keep scheduling independent of window visibility and bound to the original project.
-- Never imply gapless folder changes: separate slots stop/start; continuous adjacent
-  slots retain the first slot's folder and add markers.
+- Every slot must create its own subfolder inside the selected recording folder.
+  No continuous/shared-folder mode. Stop/start can leave a gap.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
 - Keep the Scheduler main view focused on status and the schedule. Put configuration
   in Setup, logs in Activity, and slot editing behind an explicit action. Keep
-  advanced slot options collapsed by default; avoid per-row button clusters.
+  templates collapsed by default; avoid per-row button clusters.
+- No occurrences/repetition, pre/post-roll controls or mandatory setup checklist.
+  Use direct recording start/end times and duplicate slots when needed.
+- Offer a native folder picker for the recording destination.
