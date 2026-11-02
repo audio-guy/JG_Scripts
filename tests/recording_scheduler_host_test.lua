@@ -126,7 +126,7 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
   for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
   for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns'}) do api['ImGui_'..key]=function() return 0 end end
-  api.ImGui_CollapsingHeader=function() return false end
+  api.ImGui_CollapsingHeader=function(_,label) assert(label~='Selected slot details'); return false end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
   api.ImGui_Checkbox=function(_,_,value) return false,value end
   api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
@@ -170,6 +170,25 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     frame('Cancel',{['##name']='Discarded edit'}); frame()
     f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(saved.slots[2].name,'Future capture')
+    -- A failed slot may be removed from the plan without touching recorded audio.
+    captured.state.slots[2].status='Failed'
+    local audio=root..'/keep-recording.wav'; write(audio,'keep this recording')
+    frame(nil,nil,'Future capture##slot'); frame('Delete')
+    eq(#captured.state.slots,2)
+    local recording=assert(io.open(audio,'rb')); eq(recording:read('*a'),'keep this recording'); recording:close()
+    frame('Undo'); eq(#captured.state.slots,3)
+    local project_file=h.project_file
+    h.project_file=function() return '' end
+    frame('Pause schedule')
+    frame('Resume schedule'); eq(captured.state.enabled,false)
+    frame('Add slot'); frame()
+    frame('Save slot',{['##name']='Unsaved capture',['##date']='301103',['##enddate']='301103',['##start']='21:00',['##finish']='22:00'})
+    eq(#captured.state.slots,3)
+    assert(shown['Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'])
+    frame(); assert(shown['##name'], 'Rejected draft must stay open')
+    h.project_file=project_file
+    frame('Save slot'); eq(#captured.state.slots,4)
+    frame('Resume schedule'); eq(captured.state.enabled,true)
     captured.state.enabled=true
     api.ImGui_Begin=function() windows=windows+1; return true,false end
     frame()

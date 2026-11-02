@@ -1,4 +1,4 @@
-# Recording Scheduler 2.4.1
+# Recording Scheduler 2.4.2
 
 ## Purpose
 
@@ -25,6 +25,9 @@ picker; without it, the destination can still be entered manually.
 Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
 for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
 Overlaps are rejected without changing the existing plan.
+Saving a slot or resuming requires a saved REAPER project. A rejected draft stays
+open so it can be saved after saving the project. Readiness issues are shown before
+the first start; the start-time safety check still runs.
 Missed slots that never started recording can be edited and saved with a new future
 start, including when the original start passes while the editor is open. Slots
 that already ran or attempted to record retain their history; use Duplicate instead.
@@ -68,6 +71,8 @@ checks remain enforced. There is no admin/guest distinction.
 - **Schedule:** next recording/countdown, transport controls and scrollable plan.
   Select a row for Edit, Duplicate or Delete. Completed/stopped entries are hidden
   initially; failures remain visible. Show history reveals past entries.
+  Delete removes any inactive slot from the plan, including failed and completed
+  slots. It never deletes audio files. Undo restores the removed entry.
 - **Slot editor:** name, dates and times, with optional templates in a collapsed
   section. Save returns to the plan; Cancel discards the draft. Switching views
   preserves the draft. Existing slots keep running on schedule while you plan another.
@@ -152,7 +157,7 @@ References: [REAPER ReaScript API](https://www.reaper.fm/sdk/reascript/reascript
 and [js_ReaScriptAPI dialog definitions](https://github.com/juliansader/ReaExtensions/blob/master/js_ReaScriptAPI/Source%20code/js_ReaScriptAPI_def.h).
 
 Save validation is shown directly under the form buttons. Invalid dates, past starts
-or overlaps retain the draft and leave the existing plan unchanged. Planning does
-not require an already prepared audio device, but recording still requires a saved
-project and valid armed audio inputs. A future slot fails visibly if these conditions
+or overlaps retain the draft and leave the existing plan unchanged. Saving slots
+requires a saved project, but does not require an already prepared audio device.
+Recording still requires valid armed audio inputs. A future slot fails visibly if these conditions
 are not met at its start.

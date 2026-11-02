@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.4.1
+-- @version 2.4.2
 -- @changelog
+--   Allow deleting inactive slots without touching audio; remove redundant slot details.
+--   Require a saved project when saving or resuming a schedule.
 --   Allow rescheduling missed slots, including when their start passes during editing.
 --   Schedule saved slots automatically; allow adding slots while waiting.
 --   Show save errors beside the form action and distinguish Add from Save.
@@ -18,7 +20,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.4.1' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.4.2' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -451,7 +453,7 @@ local function run(r)
   end
   state=state or Core.new()
   local engine=Engine.new(state,host)
-  if not loaderr and not state.paused then engine:watch(os.time()) end
+  if not loaderr and not state.paused and host:project_file()~='' then engine:watch(os.time()) end
   local pause_requested=state.paused or false
   local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
@@ -527,6 +529,10 @@ local function run(r)
     editor_open=true
   end
   local function commit_form(now)
+    if host:project_file()=='' then
+      error='Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'
+      return
+    end
     local s,err=Core.make(form)
     if s then
       if s.start<=now then err='Start must be in the future.'
@@ -690,7 +696,7 @@ local function run(r)
       if r.ImGui_Button(ctx,'Edit selected') then start_editor(selected,false) end
       r.ImGui_EndDisabled(ctx); r.ImGui_SameLine(ctx)
       if r.ImGui_Button(ctx,'Duplicate') then start_editor(selected,true) end
-      r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,not Core.can_edit(selected))
+      r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,selected.status=='Recording' or selected.status=='Starting')
       if r.ImGui_Button(ctx,'Delete') then
         snapshot()
         for i,s in ipairs(state.slots) do if s.id==selected.id then table.remove(state.slots,i); break end end
@@ -698,11 +704,6 @@ local function run(r)
       end
       r.ImGui_EndDisabled(ctx); r.ImGui_EndDisabled(ctx)
       if selected.note~='' then text(selected.note) end
-      if r.ImGui_CollapsingHeader(ctx,'Selected slot details') then
-        text('Folder: '..(selected.folder~='' and selected.folder or Core.folder(selected)))
-        local begin,ending=Core.bounds(selected)
-        text('Recording window: '..stamp(begin)..' to '..(ending and stamp(ending) or 'manual stop'))
-      end
     end
   end
   local function draw_activity()
@@ -740,7 +741,7 @@ local function run(r)
         r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
         local nextslot
         for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
-        status(engine.active and 'Recording' or (state.enabled and 'Scheduled' or (nextslot and 'Paused' or 'Idle')))
+        status(engine.active and 'Recording' or (nextslot and not ready and 'Not ready' or (state.enabled and 'Scheduled' or (nextslot and 'Paused' or 'Idle'))))
         r.ImGui_SameLine(ctx)
         if engine.active then
           text(engine.active.name)
@@ -759,7 +760,10 @@ local function run(r)
           if r.ImGui_Button(ctx,'Pause schedule',-1,0) then pause_requested=true; state.paused=true; engine:disable(now,'Schedule paused. Active recording keeps its planned end.') end
         elseif nextslot then
           r.ImGui_BeginDisabled(ctx,loaderr~=nil or host.storage_error~=nil)
-          if r.ImGui_Button(ctx,'Resume schedule',-1,0) then pause_requested=false; state.paused=false; state.revision=state.revision+1; engine:watch(now) end
+          if r.ImGui_Button(ctx,'Resume schedule',-1,0) then
+            if host:project_file()=='' then error='Save the REAPER project first (Cmd/Ctrl+S), then resume the schedule.'
+            else pause_requested=false; state.paused=false; state.revision=state.revision+1; error=''; engine:watch(now) end
+          end
           r.ImGui_EndDisabled(ctx)
         end
         r.ImGui_EndTable(ctx)
