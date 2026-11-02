@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.4.0
+-- @version 2.4.1
 -- @changelog
+--   Allow rescheduling missed slots, including when their start passes during editing.
 --   Schedule saved slots automatically; allow adding slots while waiting.
 --   Show save errors beside the form action and distinguish Add from Save.
 --   Display the running version in the window title while preserving window settings.
@@ -17,7 +18,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.4.0' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.4.1' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -92,11 +93,14 @@ end
 function Core.add_log(state,now,message)
   state.log[#state.log+1]={time=now,message=message}; state.revision=state.revision+1
 end
+function Core.can_edit(s)
+  return not s.actual_start and (s.status=='Scheduled' or s.status=='Missed')
+end
 function Core.apply(state, additions, replace_id)
   local nextslots={}
   for _,s in ipairs(state.slots) do
     if s.id~=replace_id then nextslots[#nextslots+1]=s
-    elseif s.status~='Scheduled' then return nil,'Only scheduled slots can be edited.' end
+    elseif not Core.can_edit(s) then return nil,'This slot has already run or attempted to record. Duplicate it to schedule another recording.' end
   end
   for _,s in ipairs(additions) do nextslots[#nextslots+1]=copy(s) end
   local a,b=Core.conflict(nextslots)
@@ -682,11 +686,11 @@ local function run(r)
     for _,s in ipairs(state.slots) do if s.id==selected_id then selected=s; break end end
     if selected then
       r.ImGui_BeginDisabled(ctx,not editable())
-      r.ImGui_BeginDisabled(ctx,selected.status~='Scheduled')
+      r.ImGui_BeginDisabled(ctx,not Core.can_edit(selected))
       if r.ImGui_Button(ctx,'Edit selected') then start_editor(selected,false) end
       r.ImGui_EndDisabled(ctx); r.ImGui_SameLine(ctx)
       if r.ImGui_Button(ctx,'Duplicate') then start_editor(selected,true) end
-      r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,selected.status~='Scheduled')
+      r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,not Core.can_edit(selected))
       if r.ImGui_Button(ctx,'Delete') then
         snapshot()
         for i,s in ipairs(state.slots) do if s.id==selected.id then table.remove(state.slots,i); break end end

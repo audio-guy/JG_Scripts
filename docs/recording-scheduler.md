@@ -1,4 +1,4 @@
-# Recording Scheduler 2.4.0
+# Recording Scheduler 2.4.1
 
 ## Purpose
 
@@ -25,6 +25,9 @@ picker; without it, the destination can still be entered manually.
 Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
 for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
 Overlaps are rejected without changing the existing plan.
+Missed slots that never started recording can be edited and saved with a new future
+start, including when the original start passes while the editor is open. Slots
+that already ran or attempted to record retain their history; use Duplicate instead.
 
 ## Recording destination
 

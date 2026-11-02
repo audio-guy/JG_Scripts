@@ -40,6 +40,33 @@ test('overlap rejected atomically with direct times',function() local st=C.new()
 test('open end conflicts with later slots',function() local st=C.new(); assert(C.apply(st,{slot{open=true}})); assert(not C.apply(st,{slot{start='21:00',finish='22:00'}})) end)
 test('adjacent slots allowed',function() local st=C.new(); assert(C.apply(st,{slot(),slot{start='20:30',finish='21:30'}})) end)
 test('edit replaces by stable id without duplicate',function() local st=C.new(); assert(C.apply(st,{slot()})); assert(C.apply(st,{slot{name='Revised'}},st.slots[1].id)); eq(#st.slots,1); eq(st.slots[1].name,'Revised') end)
+test('missed slot can be rescheduled after its start passes during editing',function()
+  local st,h,e=rig{slot()}
+  assert(e:enable(start-10))
+  local id=st.slots[1].id
+  local draft=slot{start='21:00',finish='22:00'}
+  tick(e,start+6)
+  eq(st.slots[1].status,'Missed'); eq(h.starts,0)
+  assert(C.apply(st,{draft},id))
+  eq(#st.slots,1); eq(st.slots[1].status,'Scheduled')
+  e:watch(start+7); eq(st.enabled,true)
+end)
+test('rescheduling missed slot still rejects overlap atomically',function()
+  local st=C.new(); assert(C.apply(st,{slot(),slot{start='21:00',finish='22:00'}}))
+  st.slots[1].status='Missed'
+  local before=C.serialize(st)
+  assert(not C.apply(st,{slot{start='21:30',finish='22:30'}},st.slots[1].id))
+  eq(C.serialize(st),before)
+end)
+test('recording history cannot be replaced by editing',function()
+  for _,status in ipairs{'Starting','Recording','Completed','Stopped','Partial','Interrupted','Failed','Missed'} do
+    local st=C.new(); assert(C.apply(st,{slot()}))
+    st.slots[1].status=status; st.slots[1].actual_start=start
+    local before=C.serialize(st)
+    assert(not C.apply(st,{slot{start='21:00',finish='22:00'}},st.slots[1].id))
+    eq(C.serialize(st),before)
+  end
+end)
 test('serialization round trip preserves arbitrary user content',function() local st=C.new(); assert(C.apply(st,{slot{name='Ä\t%\n$ Concert'}})); C.add_log(st,start,'Text\nTabs\t%'); st.root='/recordings A'; local restored=assert(C.deserialize(C.serialize(st))); eq(C.serialize(st),C.serialize(restored)); eq(restored.enabled,false) end)
 test('storage never executes Lua',function() assert(not C.deserialize('os.execute("bad")')); assert(not C.deserialize('JG_RECORDING_SCHEDULER\t2\nS\tbad\n')) end)
 test('restored recording is interrupted and disarmed',function() local st=C.new(); assert(C.apply(st,{slot()})); st.slots[1].status='Recording'; local restored=assert(C.deserialize(C.serialize(st))); eq(restored.slots[1].status,'Interrupted'); eq(restored.enabled,false) end)
