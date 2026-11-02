@@ -136,9 +136,12 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
   api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=function(fn) queued=fn end; api.time_precise=function() return 0 end
   api.ShowMessageBox=function(message) error(message) end
   local old=H.new; H.new=function() return h end
+  local original_engine=E.new; local captured
+  E.new=function(state,host) captured=original_engine(state,host); return captured end
   local ok,err=pcall(function()
     M.run(api)
     assert(shown['Add slot'] and not shown['##name'] and not shown['Export log'])
+    assert(not shown['Review setup'] and not shown['Select a slot to edit, duplicate or inspect its details.'])
     local function frame(button,values,selected)
       clicked,typed,tab,shown=button,values or {},selected,{}
       assert(queued)(); eq(windows,0); eq(disabled,0); eq(ids,0); eq(tables,0)
@@ -156,8 +159,13 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     frame('Cancel',{['##name']='Discarded edit'}); frame()
     f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(saved.slots[2].name,'Future capture')
+    captured.state.enabled=true
+    api.ImGui_Begin=function() windows=windows+1; return true,false end
+    frame()
+    eq(captured.state.enabled,false)
+    assert(not shown['Stop and close'])
   end)
-  H.new=old
+  H.new=old; E.new=original_engine
   for _,f in ipairs(exits) do f() end
   assert(ok,err); eq(windows,0); eq(disabled,0); eq(tables,0); eq(ids,0)
   files[root..'/session.rpp.jg-scheduler']=true

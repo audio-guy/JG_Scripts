@@ -1,4 +1,4 @@
-# Recording Scheduler 2.2
+# Recording Scheduler 2.3
 
 ## Purpose
 
@@ -17,7 +17,7 @@ picker; without it, the destination can still be entered manually.
 2. In **Setup**, choose the recording destination with **Choose folder...**.
    **Use project folder** uses the effective project recording path instead.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
-   For overnight recordings, enter the next end date. **Open-ended recording**
+   For overnight recordings, enter the next end date. **Open end**
    explicitly leaves the end to a manual stop.
 4. Select **Enable schedule**. Use Duplicate to add another similar slot.
 
@@ -51,6 +51,12 @@ The script does not change global naming preferences.
 
 ## Interface
 
+The UI is designed for an experienced operator. The compact header shows state and
+next/active slot; one message area displays concrete issues across every view.
+Explanations live under Recording help, not in the primary workflow. Technical
+checks remain enforced. There is no admin/guest distinction.
+
+
 - **Schedule:** next recording/countdown, transport controls and scrollable plan.
   Select a row for Edit, Duplicate or Delete. Completed/stopped entries are hidden
   initially; failures remain visible. Show history reveals past entries.
@@ -65,8 +71,8 @@ Plan changes are locked during enabled scheduling or an active recording. Disabl
 future starts before editing. The active end can be extended by five minutes if it
 does not conflict with another slot. Undo restores the last plan/template change.
 Disable schedule leaves an active recording's scheduled stop intact. Stop recording
-stops the owned recording and disables future starts. Closing while enabled/active
-asks whether to stop and close or keep running.
+stops the owned recording and disables future starts. Closing during an active recording asks whether to stop and close or keep running.
+Otherwise closing directly disables future starts and retains the plan.
 
 ## Readiness and limitations
 

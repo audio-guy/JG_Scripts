@@ -33,3 +33,8 @@
 - No occurrences/repetition, pre/post-roll controls or mandatory setup checklist.
   Use direct recording start/end times and duplicate slots when needed.
 - Offer a native folder picker for the recording destination.
+
+- Treat the Scheduler as an expert operator tool: no onboarding paragraphs in the
+  main view, no admin/guest split, concise labels and a single actionable message
+  area. Confirm closing only when it would stop an active recording. Keep technical
+  readiness, time, project and destination checks intact.
