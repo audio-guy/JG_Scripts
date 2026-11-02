@@ -1,4 +1,4 @@
-# Recording Scheduler 2.3.1
+# Recording Scheduler 2.4.0
 
 ## Purpose
 
@@ -19,7 +19,8 @@ picker; without it, the destination can still be entered manually.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
    For overnight recordings, enter the next end date. **Open end**
    explicitly leaves the end to a manual stop.
-4. Select **Enable schedule**. Use Duplicate to add another similar slot.
+4. Saving schedules the slot automatically. Use Duplicate to add another similar slot.
+   **Pause schedule** suspends future starts; **Resume schedule** restores them.
 
 Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
 for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
@@ -51,7 +52,7 @@ The script does not change global naming preferences.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.3.1).
+The window title shows the running version (for example, Recording Scheduler v2.4.0).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -66,15 +67,15 @@ checks remain enforced. There is no admin/guest distinction.
   initially; failures remain visible. Show history reveals past entries.
 - **Slot editor:** name, dates and times, with optional templates in a collapsed
   section. Save returns to the plan; Cancel discards the draft. Switching views
-  preserves the draft and prevents enabling until it is saved or cancelled.
+  preserves the draft. Existing slots keep running on schedule while you plan another.
 - **Setup:** recording folder and optional recording help.
 - **Activity:** all events and verified file paths, newest first; Export log writes
   `<project>.rpp.recording-log.tsv` and replaces the previous export.
 
-Plan changes are locked during enabled scheduling or an active recording. Disable
-future starts before editing. The active end can be extended by five minutes if it
+Plan changes are allowed while waiting for scheduled starts, but locked during an
+active recording. Pause scheduling before changing the destination folder. The active end can be extended by five minutes if it
 does not conflict with another slot. Undo restores the last plan/template change.
-Disable schedule leaves an active recording's scheduled stop intact. Stop recording
+Pause schedule leaves an active recording's scheduled stop intact. Stop recording
 stops the owned recording and disables future starts. Closing during an active recording asks whether to stop and close or keep running.
 Otherwise closing directly disables future starts and retains the plan.
 
@@ -82,7 +83,7 @@ Otherwise closing directly disables future starts and retains the plan.
 
 The automatic check verifies the saved/selected project, stopped transport, armed
 audio-input tracks, open audio device, and disabled looping. Destination folders
-are write-tested on enabling and again at each actual start. Existing manual
+are created and write-tested at each actual start. Existing manual
 recordings are never taken over. Recording appends after existing project content.
 
 There are no mandatory confirmation checkboxes. The operator still needs normal
@@ -106,8 +107,9 @@ sidecar, `<project>.rpp.jg-scheduler`. Save the project normally to embed the ex
 keep the sidecar with the project. Failed recovery-file writes disable future starts.
 Corrupt data is preserved for recovery instead of overwritten.
 
-Reopening always leaves scheduling disabled. Previously active slots become
-Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
+Reopening automatically watches future slots unless you explicitly paused the plan.
+An explicit pause is retained across reopening. Past starts become Missed; previously
+active slots become Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
 with pre/post-roll are converted to visible direct start/end times, preserving the
 actual recording window including seconds. Completed history retains its original
 times. Duplicating legacy history or applying an old template exposes its effective
@@ -117,7 +119,7 @@ times in the editor rather than silently applying hidden margins.
 
 | Status | Meaning |
 |---|---|
-| Scheduled | Planned; only starts when enabled |
+| Scheduled | Starts automatically at the planned time unless paused |
 | Recording | The slot is recording |
 | Completed | New nonempty files with positive source duration found on every expected track |
 | Partial | Files found, but timing was late or the system clock changed |
@@ -145,3 +147,9 @@ A real audio test remains necessary before unattended use.
 
 References: [REAPER ReaScript API](https://www.reaper.fm/sdk/reascript/reascripthelp.html)
 and [js_ReaScriptAPI dialog definitions](https://github.com/juliansader/ReaExtensions/blob/master/js_ReaScriptAPI/Source%20code/js_ReaScriptAPI_def.h).
+
+Save validation is shown directly under the form buttons. Invalid dates, past starts
+or overlaps retain the draft and leave the existing plan unchanged. Planning does
+not require an already prepared audio device, but recording still requires a saved
+project and valid armed audio inputs. A future slot fails visibly if these conditions
+are not met at its start.

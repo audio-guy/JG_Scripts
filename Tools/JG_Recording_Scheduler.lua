@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.3.1
+-- @version 2.4.0
 -- @changelog
+--   Schedule saved slots automatically; allow adding slots while waiting.
+--   Show save errors beside the form action and distinguish Add from Save.
 --   Display the running version in the window title while preserving window settings.
 --   Compact operator UI; remove onboarding copy and show actionable errors once.
 --   Simplify slots to direct start/end times; remove repetition and confirmation checklists.
@@ -15,7 +17,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.3.1' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.4.0' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -110,7 +112,7 @@ end
 
 -- A versioned, escaped data format; never execute stored project data as Lua.
 function Core.serialize(st)
-  local out={row('JG_RECORDING_SCHEDULER',2),row('P','separate',st.root,st.next_id,st.revision)}
+  local out={row('JG_RECORDING_SCHEDULER',2),row('P','separate',st.root,st.next_id,st.revision,st.paused and '1' or '0')}
   for _,s in ipairs(st.slots) do out[#out+1]=row('S',s.id,s.name,s.start,s.finish or '',s.pre,s.post,s.status,s.note,s.actual_start or '',s.actual_end or '',s.folder or '') end
   for _,e in ipairs(st.log) do out[#out+1]=row('L',e.time,e.message) end
   for _,t in ipairs(st.templates) do out[#out+1]=row('T',t.name,t.start,t.finish,t.open and '1' or '0',t.pre,t.post,t.enddays or 0) end
@@ -128,6 +130,7 @@ function Core.deserialize(text)
     elseif f[1]=='P' then
       if f[2]~='separate' and f[2]~='continuous' then return nil,'Invalid recording mode in saved plan.' end
       st.mode,st.root,st.next_id,st.revision='separate',f[3],tonumber(f[4]),tonumber(f[5])
+      st.paused=f[6]=='1'
       if not finite(st.next_id) or st.next_id<1 or not finite(st.revision) then return nil,'Invalid plan metadata.' end
     elseif f[1]=='S' then
       local s={id=tonumber(f[2]),name=f[3],start=tonumber(f[4]),finish=tonumber(f[5]),pre=tonumber(f[6]),post=tonumber(f[7]),status=f[8],note=f[9],actual_start=tonumber(f[10]),actual_end=tonumber(f[11]),folder=f[12]}
@@ -171,6 +174,20 @@ function Engine:enable(now)
     if not prepared then return nil,problem end
   end
   self.state.enabled=true; self:log(now,'Schedule enabled.'); return true
+end
+-- Watching a plan does not bypass readiness checks at the actual recording start.
+function Engine:watch(now)
+  local pending=false
+  for _,slot in ipairs(self.state.slots) do
+    if slot.status=='Scheduled' then
+      if Core.bounds(slot)<=now then
+        slot.status='Missed'; slot.note='Start passed while the scheduler was closed or paused.'
+        self:log(now,Core.folder(slot)..': '..slot.note)
+      else pending=true end
+    end
+  end
+  self.state.enabled=pending
+  if pending then self:log(now,'Watching scheduled slots.') end
 end
 function Engine:finalize(now,requested,reason)
   local ok,detail=self.host:verify()
@@ -430,6 +447,8 @@ local function run(r)
   end
   state=state or Core.new()
   local engine=Engine.new(state,host)
+  if not loaderr and not state.paused then engine:watch(os.time()) end
+  local pause_requested=state.paused or false
   local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
   local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
   local editing=nil; local error=loaderr or ''; local template_index=1
@@ -455,7 +474,8 @@ local function run(r)
   end
   local function snapshot() undo=Core.serialize(state) end
   local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
-  local function editable() return not state.enabled and not engine.active end
+  local function editable() return not engine.active end
+  local function setup_editable() return not state.enabled and not engine.active end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
   local function edit(s,duplicate)
     editing=not duplicate and s.id or nil
@@ -509,7 +529,11 @@ local function run(r)
       else
         snapshot()
         local ok; ok,err=Core.apply(state,{s},editing)
-        if ok then selected_id=state.next_id-1; clear_form(); editor_open=false end
+        if ok then
+          selected_id=state.next_id-1; clear_form(); editor_open=false
+          save()
+          if not pause_requested and not loaderr and not host.storage_error then engine:watch(now) end
+        end
       end
     end
     error=err or ''
@@ -575,13 +599,14 @@ local function run(r)
       text('Folder: '..Core.folder(preview))
       muted(ending and duration(ending-begin) or 'Manual stop')
     end
-    if r.ImGui_Button(ctx,editing and 'Save changes' or 'Add slot',140,0) then commit_form(now) end
+    if r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) then commit_form(now) end
     r.ImGui_SameLine(ctx)
     if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
+    if editor_open and error~='' then text(error) end
   end
   local function draw_setup()
     text('Recording destination')
-    r.ImGui_BeginDisabled(ctx,not editable())
+    r.ImGui_BeginDisabled(ctx,not setup_editable())
     r.ImGui_SetNextItemWidth(ctx,-1)
     local changed,value=r.ImGui_InputText(ctx,'##recording_root',state.root)
     if changed then state.root=value; state.revision=state.revision+1 end
@@ -595,7 +620,7 @@ local function run(r)
     r.ImGui_Separator(ctx)
     muted('Subfolders: YYMMDD - HHMM Name')
     r.ImGui_EndDisabled(ctx)
-    if not editable() then muted('Locked while scheduling or recording.') end
+    if not setup_editable() then muted('Pause scheduling to change the recording folder.') end
     if r.ImGui_CollapsingHeader(ctx,'Recording help') then
       text('Separate slots stop/start and can leave a gap. Use a single slot for continuous capture.')
       text('Use normal recording mode with no limit/count-in, and keep recorded files without a confirmation dialog. Check inputs, levels and disk space.')
@@ -711,7 +736,7 @@ local function run(r)
         r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
         local nextslot
         for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
-        status(engine.active and 'Recording' or (state.enabled and 'Enabled' or 'Standby'))
+        status(engine.active and 'Recording' or (state.enabled and 'Scheduled' or (nextslot and 'Paused' or 'Idle')))
         r.ImGui_SameLine(ctx)
         if engine.active then
           text(engine.active.name)
@@ -723,22 +748,22 @@ local function run(r)
         else muted('No upcoming slots') end
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
-          if r.ImGui_Button(ctx,'Stop recording',-1,0) then engine:stop(now) end
+          if r.ImGui_Button(ctx,'Stop recording',-1,0) then pause_requested=true; state.paused=true; engine:stop(now) end
           if engine.active and engine.active.finish and r.ImGui_Button(ctx,'Extend by 5 min',-1,0) then local ok,err=engine:extend(now,300); if not ok then error=err end end
-        elseif state.enabled then
-          if r.ImGui_Button(ctx,'Disable schedule',-1,0) then engine:disable(now) end
-        else
-          r.ImGui_BeginDisabled(ctx,not ready or loaderr~=nil or editor_open)
-          if r.ImGui_Button(ctx,'Enable schedule',-1,0) then save(); local ok,err=engine:enable(now); if not ok then error=err end end
+        end
+        if state.enabled then
+          if r.ImGui_Button(ctx,'Pause schedule',-1,0) then pause_requested=true; state.paused=true; engine:disable(now,'Schedule paused. Active recording keeps its planned end.') end
+        elseif nextslot then
+          r.ImGui_BeginDisabled(ctx,loaderr~=nil or host.storage_error~=nil)
+          if r.ImGui_Button(ctx,'Resume schedule',-1,0) then pause_requested=false; state.paused=false; state.revision=state.revision+1; engine:watch(now) end
           r.ImGui_EndDisabled(ctx)
         end
-        if engine.active and state.enabled and r.ImGui_Button(ctx,'Disable future starts',-1,0) then engine:disable(now) end
         r.ImGui_EndTable(ctx)
       end
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       -- One persistent message area across all views, including the editor.
-      local message=host.storage_error or loaderr or (error~='' and error)
+      local message=host.storage_error or loaderr or (not editor_open and error~='' and error)
       if not message and not engine.active and not ready then message=readiness end
       if message and message~='' then text(message) end
       if close_requested then

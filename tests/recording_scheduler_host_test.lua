@@ -119,7 +119,9 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
   api.ImGui_SetNextWindowSizeConstraints=noop; api.ImGui_PushStyleVar=noop; api.ImGui_PopStyleVar=noop
   for _,key in ipairs({'WindowPadding','FramePadding','ItemSpacing','CellPadding','FrameRounding'}) do api['ImGui_StyleVar_'..key]=function() return 0 end end
   api.ImGui_Begin=function() windows=windows+1; return true,true end; api.ImGui_End=function() windows=windows-1; assert(windows>=0) end
-  api.ImGui_BeginDisabled=function() disabled=disabled+1 end; api.ImGui_EndDisabled=function() disabled=disabled-1; assert(disabled>=0) end
+  local locks={}
+  api.ImGui_BeginDisabled=function(_,locked) disabled=disabled+1; locks[disabled]=locked end
+  api.ImGui_EndDisabled=function() locks[disabled]=nil; disabled=disabled-1; assert(disabled>=0) end
   api.ImGui_BeginTable=function() tables=tables+1; return true end; api.ImGui_EndTable=function() tables=tables-1 end
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
   for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
@@ -129,7 +131,7 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
   api.ImGui_Checkbox=function(_,_,value) return false,value end
   api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
   api.ImGui_Combo=api.ImGui_Checkbox
-  api.ImGui_Button=function(_,label) shown[label]=true; return clicked==label end
+  api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
   api.ImGui_Selectable=function(_,label) return tab==label end
   api.ImGui_GetContentRegionAvail=function() return 900,500 end
   api.GetProjectName=function() return 'session.rpp' end
@@ -148,9 +150,18 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     end
     frame('Add slot'); frame()
     assert(shown['##name'] and shown['##start'] and not shown['##pre'])
-    frame('Add slot',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
+    frame('Save slot',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
     local f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); local saved=assert(C.deserialize(f:read('*a'))); f:close()
-    eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture')
+    eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture'); eq(captured.state.enabled,true)
+    frame('Add slot'); frame()
+    frame('Save slot',{['##name']='Overlap attempt',['##date']='301102',['##enddate']='301102',['##start']='21:30',['##finish']='22:30'})
+    assert(shown['Overlap: Future capture / Overlap attempt. Adjust the times before saving.'], 'Save rejection must be visible immediately beside the form action')
+    frame('Cancel')
+    frame('Pause schedule'); eq(captured.state.enabled,false)
+    frame('Add slot'); frame()
+    frame('Save slot',{['##name']='Later capture',['##date']='301102',['##enddate']='301102',['##start']='23:00',['##finish']='23:30'})
+    eq(captured.state.enabled,false)
+    frame('Resume schedule'); eq(captured.state.enabled,true)
     frame(nil,nil,'Setup'); assert(shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
     frame(nil,nil,'Activity'); assert(shown['Export log'] and not shown['##recording_root'])
     frame(nil,nil,'Schedule'); assert(shown['Add slot'] and not shown['##name'])

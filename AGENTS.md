@@ -40,3 +40,8 @@
   main view, no admin/guest split, concise labels and a single actionable message
   area. Confirm closing only when it would stop an active recording. Keep technical
   readiness, time, project and destination checks intact.
+
+- Saving a valid future slot schedules it automatically. No separate Enable step.
+  Allow adding/editing slots while waiting; protect active recording and destination
+  changes. Preserve an explicit Pause across reopening. Show save validation next
+  to the form action and retain rejected drafts.
