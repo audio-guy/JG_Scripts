@@ -163,7 +163,7 @@ test('full collapsed UI executes actual scheduled start and stop',function()
   files[root..'/session.rpp.jg-scheduler']=true
   assert(ok,err)
 end)
-test('schedule, setup, activity and editor flows preserve data and native stacks',function()
+test('single schedule view, settings, activity window and editor preserve data and native stacks',function()
   os.remove(root..'/session.rpp.jg-scheduler')
   local h,api=rig(); local st=C.new(); st.mode='separate'; assert(C.apply(st,{slot('Visible test')}))
   st.templates={{name='Template',start='19:30',finish='20:30',open=false,pre='0',post='0',enddays=0}}
@@ -186,13 +186,18 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
   for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
   for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns'}) do api['ImGui_'..key]=function() return 0 end end
-  api.ImGui_CollapsingHeader=function(_,label) assert(label~='Selected slot details'); return false end
+  local settings_open=false
+  api.ImGui_CollapsingHeader=function(_,label)
+    assert(label~='Selected slot details' and label~='Recording help' and label~='Templates')
+    if label=='Recording settings' then if clicked==label then settings_open=not settings_open end; return settings_open end
+    return false
+  end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
   api.ImGui_Checkbox=function(_,_,value) return false,value end
   api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
   api.ImGui_Combo=api.ImGui_Checkbox
   api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
-  api.ImGui_Selectable=function(_,label) return tab==label end
+  api.ImGui_Selectable=function(_,label) assert(label~='Schedule' and label~='Setup' and label~='Activity'); return tab==label end
   api.ImGui_GetContentRegionAvail=function() return 900,500 end
   api.GetProjectName=function() return 'session.rpp' end
   api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=function(fn) queued=fn end; api.time_precise=function() return 0 end
@@ -222,9 +227,12 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     frame('Save slot',{['##name']='Later capture',['##date']='301102',['##enddate']='301102',['##start']='23:00',['##finish']='23:30'})
     eq(captured.state.enabled,false)
     frame('Resume schedule'); eq(captured.state.enabled,true)
-    frame(nil,nil,'Setup'); assert(shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
-    frame(nil,nil,'Activity'); assert(shown['Export log'] and not shown['##recording_root'])
-    frame(nil,nil,'Schedule'); assert(shown['Add slot'] and not shown['##name'])
+    frame('Recording settings'); assert(shown['Add slot'] and shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
+    frame('Recording settings'); frame('Activity log'); assert(shown['Export log'] and shown['Add slot'] and not shown['##recording_root'])
+    local normal_begin=api.ImGui_Begin
+    api.ImGui_Begin=function(_,title) windows=windows+1; return true,not title:find('###Recording Scheduler Activity',1,true) end
+    frame(); api.ImGui_Begin=normal_begin
+    frame(); assert(shown['Add slot'] and not shown['Export log'] and not shown['##name'])
     frame(nil,nil,'Future capture##slot'); frame('Edit selected'); frame()
     assert(shown['Save changes'])
     frame('Cancel',{['##name']='Discarded edit'}); frame()
@@ -249,11 +257,11 @@ test('schedule, setup, activity and editor flows preserve data and native stacks
     h.project_file=project_file
     frame('Save slot'); eq(#captured.state.slots,4)
     frame('Resume schedule'); eq(captured.state.enabled,true)
-    frame('Pause schedule'); frame(nil,nil,'Setup')
+    frame('Pause schedule'); frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
     frame(); eq(captured.state.mode,'continuous')
     api.ImGui_Combo=api.ImGui_Checkbox
-    frame(nil,nil,'Schedule')
+    frame('Recording settings')
     captured.state.captures={{id='ui',wall=0,position=0,folder=root,bands={{region=1,start=0,name='Band'}},files={}}}
     api.EnumProjectMarkers3=function(_,i) if i>0 then return 0 end; return 1,true,0,10,'Band renamed',1,0 end
     frame('Export band folders...'); frame()

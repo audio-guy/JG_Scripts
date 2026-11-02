@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.1
+-- @version 2.5.2
 -- @changelog
+--   Replace tabs with one schedule view, collapsible settings and an optional activity window.
+--   Remove Recording help.
 --   Place recordings by clock time on the timeline; preserve a project reference day.
 --   Reject collisions on armed tracks instead of appending after existing material.
 --   Add explicit continuous recording, editable band regions and raw WAV band export.
@@ -24,7 +26,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.1' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.2' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -786,7 +788,7 @@ local function run(r)
     local ok=f:write(table.concat(out,'\n')..'\n'); local closed=f:close()
     error=ok and closed and ('Log exported: '..path) or 'Could not finish writing the activity log.'
   end
-  local view='Schedule'
+  local show_activity=false
   local editor_open=false
   local selected_id=nil
   local function duration(seconds)
@@ -888,13 +890,7 @@ local function run(r)
     muted('Subfolders: YYMMDD - HHMM Name')
     r.ImGui_EndDisabled(ctx)
     if not setup_editable() then muted('Pause scheduling to change mode or destination. Finish active recording/export first.') end
-    if r.ImGui_CollapsingHeader(ctx,'Recording help') then
-      text('Continuous recording includes all pauses, even overnight. Pause schedule does not shorten an active continuous recording; Stop recording ends it.')
-      text('Use normal recording mode with no limit/count-in, and keep recorded files without a confirmation dialog. Check inputs, levels and disk space.')
-      text('Keep REAPER running. Scheduling follows the system clock and is not sample accurate. A late start may be missed.')
-      text('Plans are saved with this project and in a recovery sidecar. Future slots resume after reopening unless explicitly paused.')
-      text('Completed means new files were found on every expected track. Check the audio before treating a recording as verified.')
-    end
+
   end
   local function draw_schedule(now)
     if export_task then
@@ -956,6 +952,8 @@ local function run(r)
       end
     end
     r.ImGui_EndDisabled(ctx); r.ImGui_EndDisabled(ctx)
+    r.ImGui_SameLine(ctx)
+    if r.ImGui_Button(ctx,'Activity log') then show_activity=true end
     r.ImGui_SameLine(ctx)
     local changed,value=r.ImGui_Checkbox(ctx,'Show history',show_history); if changed then show_history=value end
     local _,height=r.ImGui_GetContentRegionAvail(ctx)
@@ -1078,7 +1076,7 @@ local function run(r)
       muted(state.mode=='continuous' and 'Continuous recording / pauses included' or 'Separate slots / individual folders')
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
-      -- One persistent message area across all views, including the editor.
+      -- One persistent message area, including the editor.
       local message=host.storage_error or loaderr or (not editor_open and error~='' and error)
       if not message and not engine.active and not ready then message=readiness end
       if message and message~='' then text(message) end
@@ -1089,16 +1087,21 @@ local function run(r)
         if r.ImGui_Button(ctx,'Keep running') then close_requested=false end
       end
       r.ImGui_Separator(ctx)
-      for _,name in ipairs({'Schedule','Setup','Activity'}) do
-        if name~='Schedule' then r.ImGui_SameLine(ctx) end
-        if r.ImGui_Selectable(ctx,name,view==name,0,100,26) then view=name end
-      end
-      r.ImGui_Separator(ctx)
-      if view=='Schedule' then draw_schedule(now)
-      elseif view=='Setup' then draw_setup()
-      else draw_activity() end
+      if r.ImGui_CollapsingHeader(ctx,'Recording settings') then draw_setup(); r.ImGui_Separator(ctx) end
+      draw_schedule(now)
       r.ImGui_PopFont(ctx)
       r.ImGui_End(ctx)
+    end
+    if show_activity and open then
+      r.ImGui_SetNextWindowSize(ctx,760,420,r.ImGui_Cond_FirstUseEver())
+      local log_visible,log_open=r.ImGui_Begin(ctx,'Activity log###Recording Scheduler Activity',true)
+      show_activity=log_open
+      if log_visible then
+        r.ImGui_PushFont(ctx,nil,16)
+        draw_activity()
+        r.ImGui_PopFont(ctx)
+        r.ImGui_End(ctx)
+      end
     end
     r.ImGui_PopStyleVar(ctx,5)
     if not open then

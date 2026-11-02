@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.1
+# Recording Scheduler 2.5.2
 
 ## Purpose
 
@@ -12,7 +12,7 @@ pre/post-roll controls, templates or confirmation checklist.
 - **Separate slots:** each slot starts/stops into its own folder. Existing version 2
   plans retain this mode. Adjacent slots can have an audio gap.
 
-Mode is never inferred from adjacency. Choose it in Setup before scheduling, or
+Mode is never inferred from adjacency. Choose it in Recording settings before scheduling, or
 pause the schedule to change it. Mode/destination cannot change during recording.
 
 ## Installation and use
@@ -22,7 +22,7 @@ Load `Tools/JG_Recording_Scheduler.lua` in REAPER's Actions list. Requires ReaIm
 picker; without it, the destination can still be entered manually.
 
 1. Save the project and arm the intended audio input tracks.
-2. In **Setup**, choose the recording mode and destination with **Choose folder...**.
+2. In **Recording settings**, choose the recording mode and destination with **Choose folder...**.
    **Use project folder** uses the effective project recording path instead.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
    For overnight recordings, enter the next end date. **Open end**
@@ -44,7 +44,7 @@ that already ran or attempted to record retain their history; use Duplicate inst
 
 A start at 00:52 is placed at timeline time 00:52:00, independent of the edit cursor
 or project length. The first recording establishes a midnight reference day, saved
-with the project and shown in Setup. Later days continue beyond 24 hours rather
+with the project and shown in Recording settings. Later days continue beyond 24 hours rather
 than wrapping over existing recordings. Project start-time offsets are respected;
 a resulting position before the project start is rejected. Late starts are placed
 at their actual start time rather than backdated to the intended start.
@@ -113,14 +113,14 @@ capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.4.0).
+The window title shows the running version (for example, Recording Scheduler v2.5.2).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
 The UI is designed for an experienced operator. The compact header shows state and
-next/active slot; one message area displays concrete issues across every view.
-Explanations live under Recording help, not in the primary workflow. Technical
-checks remain enforced. There is no admin/guest distinction.
+next/active slot; one message area displays concrete issues. There are no navigation
+tabs or Recording help panel. Technical checks remain enforced. There is no
+admin/guest distinction.
 
 
 - **Schedule:** next recording/countdown, transport controls and scrollable plan.
@@ -128,10 +128,10 @@ checks remain enforced. There is no admin/guest distinction.
   initially; failures remain visible. Show history reveals past entries.
   Delete removes any inactive slot from the plan, including failed and completed
   slots. It never deletes audio files. Undo restores the removed entry.
-- **Slot editor:** name, dates and times. Use Duplicate for similar slots. Save returns to the plan; Cancel discards the draft. Switching views
-  preserves the draft. Existing slots keep running on schedule while you plan another.
+- **Slot editor:** name, dates and times. Use Duplicate for similar slots. Save returns to the plan; Cancel discards the draft. Existing slots keep running on schedule while you plan another.
 - **Setup:** recording folder and optional recording help.
-- **Activity:** all events and verified file paths, newest first; Export log writes
+- **Activity log:** opens a separate optional window with events and verified file
+  paths, newest first. Closing it leaves scheduling active. Export log writes
   `<project>.rpp.recording-log.tsv` and replaces the previous export.
 
 Plan changes are allowed while waiting for scheduled starts, but locked during an
@@ -147,13 +147,13 @@ Otherwise closing directly disables future starts and retains the plan.
 The automatic check verifies the saved/selected project, stopped transport, armed
 audio-input tracks, open audio device, and disabled looping. Destination folders
 are created and write-tested at each actual start. Existing manual
-recordings are never taken over. Recording appends after existing project content.
+recordings are never taken over. Recordings use clock-aligned timeline positions;
+collisions with existing media on armed tracks block the start.
 
 There are no mandatory confirmation checkboxes. The operator still needs normal
 record mode, no recording-length limit/count-in, automatic retention of recorded
 files, correct routing/levels, sufficient disk space and a computer that stays awake.
-Those conditions are explained under Recording help; they are not all measured
-by the script. Writing a small probe file does not reserve disk space.
+These conditions are not all measured by the script. Writing a small probe file does not reserve disk space.
 
 The scheduler is bound to its original project. Changing project tabs disables
 future starts; an owned recording keeps its scheduled stop in the original project.

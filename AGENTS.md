@@ -32,7 +32,8 @@
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
 - Keep the Scheduler main view focused on status and the schedule. Put configuration
-  in Setup, logs in Activity, and slot editing behind an explicit action. Keep
+  in a collapsed Recording settings section, logs in an optional Activity log window,
+  and slot editing behind an explicit action. No navigation tabs or Recording help. Keep
   the editor free of templates; use Duplicate for similar slots and avoid per-row button clusters.
 - No occurrences/repetition, pre/post-roll controls or mandatory setup checklist.
   Use direct recording start/end times and duplicate slots when needed.
