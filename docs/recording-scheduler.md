@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.7
+# Recording Scheduler 2.6.0
 
 ## Purpose
 
@@ -6,10 +6,10 @@ For unattended audio recordings and attended live capture, not studio workflows.
 The main view shows the explicit project recording mode. No repetition,
 pre/post-roll controls, templates or confirmation checklist.
 
-- **Continuous recording:** one transport recording from the first future slot to
-  the last end, including every gap (even overnight). New projects default to this.
-  The running slot’s name and end remain editable; its start stays fixed. Bands
-  become editable REAPER regions.
+- **Shared WAV:** records slots into shared source files per track and automatically
+  pauses between them. Resume appends to the same files, without rendering or
+  concatenation. New projects default to this mode. The running slot's name and
+  end remain editable; its start stays fixed. Bands become editable REAPER regions.
 - **Separate slots:** each slot starts/stops into its own folder. Existing version 2
   plans retain this mode. Adjacent slots can have an audio gap.
 
@@ -40,7 +40,7 @@ that slot at the new start. **Shorten and save** applies both changes together;
 **Keep editing** leaves the plan unchanged. Undo restores both changes. Equal
 starts, additional conflicts and already recorded slots require manual correction.
 If the schedule changes while confirmation is open, it must be reviewed again.
-Saving a slot or resuming requires a saved REAPER project. A rejected draft stays
+Saving a slot requires a saved REAPER project. A rejected draft stays
 open so it can be saved after saving the project. Readiness issues are shown before
 the first start; the start-time safety check still runs.
 Missed slots that never started recording can be edited and saved with a new future
@@ -56,6 +56,19 @@ than wrapping over existing recordings. Project start-time offsets are respected
 a resulting position before the project start is rejected. Late starts are placed
 at their actual start time rather than backdated to the intended start.
 
+In Shared WAV mode, REAPER initially writes a compact recording item without the
+pauses. After Stop, the Scheduler splits and moves only those newly recorded items
+to their clock positions. All resulting items continue to reference the original
+WAVs. The band regions remain at clock positions throughout. Adjacent slots need
+no transport pause. During capture, the live waveform after a gap is therefore
+not yet aligned with the clock-positioned regions.
+
+Pause boundaries use REAPER's processing cursor rather than its audible cursor.
+Automatic resumes more than five seconds late are rejected; changing the armed
+tracks, recording inputs/modes or sample rate while paused also stops the session.
+Manually pausing or resuming the transport is treated as an interruption. Stop
+recording works during a scheduled gap as well as during an active slot.
+
 The recording span is checked against existing media on armed tracks before any
 recording settings or transport changes. A collision blocks the start with an error;
 existing material is never automatically moved or overwritten. Existing recordings
@@ -68,24 +81,25 @@ after such a change, elapsed timeline time can differ from local clock time.
 ## Recording destination
 
 The selected folder is the parent. In Separate slots mode each recording has its
-own `YYMMDD - HHMM Name` subfolder. In Continuous recording mode the entire session
-uses `YYMMDD - HHMM Originals <unique ID>`. This includes audio between bands.
+own `YYMMDD - HHMM Name` subfolder. In Shared WAV mode the entire session
+uses `YYMMDD - HHMM Originals <unique ID>`. Audio between bands is omitted.
 
 Folder names preserve user names, replacing only filesystem-invalid characters.
 The root may be absolute or relative to the saved project. Cancelling the folder
 picker preserves the previous path. Separate-slot directories may be reused;
-REAPER supplies unique filenames. Continuous sessions use unique directories.
+REAPER supplies unique filenames. Shared sessions use unique directories.
 
 ## Band regions and export
 
-Continuous recording creates named regions from the planned times. These are
+Shared WAV creates named regions from the planned times. These are
 editing boundaries, not transport commands. They remain editable after recording;
 changing a region does not reschedule a recording. An open-ended final region is
 closed when recording stops, including a manual REAPER transport stop while the
 Scheduler stays running. During capture it is a short placeholder, not a growing
-region. Its final end follows the detected wall-clock stop (second resolution).
+region. Its final end is limited to the actual captured audio. Generated finite ends are
+also fitted to the available samples; manually adjusted edges are preserved.
 Editing a running slot updates its linked region
-name/end. Changing the final slot’s end also changes the continuous capture stop.
+name/end. Changing the final slot’s end also changes the shared capture stop.
 
 1. Finish the recording and adjust the band regions in REAPER. Keep their region
    IDs: move/resize/rename them, rather than deleting/recreating or renumbering them.
@@ -119,12 +133,14 @@ available after deleting schedule rows; deleting rows never deletes audio/region
 Export runs in small deferred chunks, may be cancelled and is unavailable during
 recording. Upcoming slots continue to be watched; a recording start cancels any
 unfinished export. Close the Scheduler to cancel an active export.
-The application does not change global REAPER file-splitting preferences: continuous
-capture may comprise several physically separate WAV files.
+The application does not change global REAPER file-splitting preferences. Native
+size limits or enabled file splitting may still create multiple source files per
+track; pause/resume itself does not create a new file. Configure WAV/RF64 and the
+file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.9).
+The window title shows the running version (for example, Recording Scheduler v2.6.0).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -154,12 +170,12 @@ While recording, double-click the currently recording slot or use Edit selected.
 Its name and end time can change; its start date/time are locked. Leave the end
 blank for manual stop if no later slot would overlap. The new end must be in the
 future and must not overlap another slot. The list, linked band region and capture
-stop are updated together without restarting transport. A continuous capture still
-runs to its final slot: editing an earlier band does not shorten the entire session.
+stop are updated together without restarting transport. A shared capture still
+ends with its final slot: editing an earlier band does not shorten the entire session.
 The Extend by 5 min control has been removed.
 
 Add slot stays available during recording in both modes. Separate slots are added
-as scheduled recordings with their own folders; Continuous recording appends bands
+as scheduled recordings with their own folders; Shared WAV appends bands
 after the last planned band and extends the capture without restarting transport.
 A running or planned predecessor can be shortened at the new start only after
 explicit confirmation. Conflicts with other slots are rejected before changing the
@@ -168,8 +184,8 @@ Deleting, duplicating and undoing plan changes remain locked during capture,
 as do mode/destination changes. Completed recording history cannot be edited.
 If a recording ends while its editor is open, saving is rejected. Live edits clear
 the plan Undo snapshot to prevent restoring stale recording state.
-In Continuous mode the scheduled stop is the last slot’s end, including all bands
-and gaps. Stop recording ends the current capture. Future independent slots
+In Shared WAV mode the scheduled stop is the last slot’s end. Gaps show
+Waiting between slots and pause the recording transport automatically. Stop recording ends the current capture. Future independent slots
 remain scheduled. Closing during an active recording asks whether to stop and close or keep running.
 Otherwise closing directly disables future starts and retains the plan.
 
@@ -202,11 +218,17 @@ Starts over five seconds late are missed; late stops or clock changes require re
 Plans, capture maps, region links and logs are stored in project extstate and an immediate recovery
 sidecar, `<project>.rpp.jg-scheduler`. Save the project normally to embed the extstate;
 keep the sidecar with the project. Failed recovery-file writes disable future starts.
-Corrupt data is preserved for recovery instead of overwritten.
+Corrupt data is preserved for recovery instead of overwritten. A crash before
+finalization can leave compact items in the project. Source boundary maps are
+retained in the sidecar for manual recovery; reopening does not resume an open
+recording or automatically rearrange interrupted material. Missing/conflicting
+items stop automatic placement and block export rather than modifying originals.
 
 Reopening automatically watches future slots. Obsolete saved pause flags are
 ignored; the selected recording mode is retained. Version 2
-plans are migrated to Separate slots; version 3 persists the explicit mode. Past starts become Missed; previously
+plans are migrated to Separate slots. Existing Continuous plans now use Shared
+WAV; their earlier recordings and export maps remain unchanged. Format version 4
+adds source-boundary maps and reads formats 2 and 3. Past starts become Missed; previously
 active slots become Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
 with pre/post-roll are converted to visible direct start/end times, preserving the
 actual recording window including seconds. Completed history retains its original
@@ -244,8 +266,10 @@ The tests use the real parser, state machine, storage, adapter and GUI loop with
 mock REAPER host. They cover timing, migration, dedicated folders, ownership,
 file verification, cancelled edits and native picker selection/cancellation/errors.
 Generated PCM fixtures additionally verify sample-byte-accurate region cuts, split
-source files, format handling and cancellation. A real audio test remains necessary
-before unattended use; mocked host tests cannot validate driver or disk timing.
+source files, format handling and cancellation. The native two-track/three-slot test and its limitations are documented in
+[the pause test report](recording-scheduler-pause-test.md). Tests with the intended
+input hardware remain necessary before unattended use; output-recording probes
+cannot validate every driver's latency compensation or disk behavior.
 
 References: [REAPER ReaScript API](https://www.reaper.fm/sdk/reascript/reascripthelp.html)
 and [js_ReaScriptAPI dialog definitions](https://github.com/juliansader/ReaExtensions/blob/master/js_ReaScriptAPI/Source%20code/js_ReaScriptAPI_def.h).

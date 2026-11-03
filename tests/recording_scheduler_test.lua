@@ -18,6 +18,9 @@ local function rig(slots,mode)
   function host:recording() return self.rec end
   function host:start(s) self.starts=self.starts+1; self.rec=not self.fail_start; s.folder=C.folder(s); return self.rec,'Start failed' end
   function host:stop() self.stops=self.stops+1; if not self.fail_stop then self.rec=false end end
+  function host:paused() return self.is_paused or false end
+  function host:pause_capture() self.is_paused=true; self.pauses=(self.pauses or 0)+1; return not self.fail_pause,'Pause failed' end
+  function host:resume_capture() if self.fail_resume then return nil,'Resume failed' end; self.is_paused=false; self.resumes=(self.resumes or 0)+1; return true end
   function host:marker() self.markers=self.markers+1 end
   function host:restore() self.restores=self.restores+1 end
   function host:verify() return self.verified,'Missing audio files' end
@@ -83,7 +86,7 @@ test('project tab switch disarms and still stops owned recording',function() loc
 test('closed project never receives a stop/start',function() local st,h,e=rig{slot()}; assert(e:enable(start-10)); h.valid_project=false; eq(tick(e,start),false); eq(h.starts,0); eq(h.stops,0) end)
 test('legacy plans retain separate mode while new plans use continuous',function()
   eq(C.new().mode,'continuous')
-  local old=C.serialize(C.new()):gsub('JG_RECORDING_SCHEDULER\t3','JG_RECORDING_SCHEDULER\t2')
+  local old=C.serialize(C.new()):gsub('JG_RECORDING_SCHEDULER\t4','JG_RECORDING_SCHEDULER\t2')
   eq(assert(C.deserialize(old)).mode,'separate')
   eq(assert(C.deserialize(C.serialize(C.new()))).mode,'continuous')
 end)
@@ -96,11 +99,11 @@ test('continuous adjacent slots never stop or restart at the boundary',function(
   eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed')
   eq(st.slots[1].actual_end,start+3600); eq(st.slots[2].actual_start,start+3600)
 end)
-test('continuous recording includes gaps and keeps its end after pause',function()
+test('shared recording pauses in gaps and resumes the same capture',function()
   local st,h,e=rig({slot(),slot{start='22:00',finish='23:00',name='Encore'}},'continuous')
   e:watch(start-10); tick(e,start); tick(e,start+4000)
-  eq(h.stops,0); eq(st.slots[2].status,'In session')
-  e:disable(start+4001); tick(e,start+9000); eq(h.starts,1); eq(h.stops,0)
+  eq(h.stops,0); eq(h.pauses,1); eq(e.gap_paused,true); eq(st.slots[2].status,'In session')
+  e:disable(start+4001); tick(e,start+9000); eq(h.starts,1); eq(h.stops,0); eq(h.resumes,1); eq(e.gap_paused,false)
   tick(e,start+12600); eq(h.stops,1); eq(st.slots[2].status,'Completed')
 end)
 test('manual continuous stop preserves completed bands and interrupts future bands',function()
@@ -239,5 +242,39 @@ test('separate live add rejects overlap with following slot without mutation',fu
   local before=C.serialize(st)
   local ok,err,proposal=e:append_live(slot{start='20:45',finish='21:15'},start+60)
   assert(not ok and not proposal); eq(C.serialize(st),before)
+end)
+test('shared capture never pauses adjacent slots',function()
+  local st,h,e=rig({slot(),slot{start='20:30',finish='21:30'}},'continuous')
+  e:watch(start-1); tick(e,start); tick(e,start+3600)
+  eq(h.pauses,nil); eq(h.resumes,nil); eq(h.starts,1)
+end)
+test('shared capture rejects an external resume during a scheduled gap',function()
+  local st,h,e=rig({slot(),slot{start='22:00',finish='23:00'}},'continuous')
+  e:watch(start-1); tick(e,start); tick(e,start+3600); h.is_paused=false
+  tick(e,start+3601); eq(e.active,nil); eq(h.stops,1); eq(st.slots[2].status,'Interrupted')
+end)
+test('shared capture stops on failed pause or failed resume',function()
+  for _,failure in ipairs{'fail_pause','fail_resume'} do
+    local st,h,e=rig({slot(),slot{start='22:00',finish='23:00'}},'continuous')
+    e:watch(start-1); tick(e,start); h[failure]=true; tick(e,start+3600)
+    if failure=='fail_resume' then tick(e,start+9000) end
+    eq(e.active,nil); eq(h.stops,1); eq(st.slots[2].actual_start,nil)
+  end
+end)
+test('shared capture does not resume a missed slot after a long stall',function()
+  local st,h,e=rig({slot(),slot{start='22:00',finish='23:00'}},'continuous')
+  e:watch(start-1); tick(e,start); tick(e,start+3600); tick(e,start+9010)
+  eq(h.resumes,nil); eq(e.active,nil); eq(st.slots[2].actual_start,nil); eq(st.slots[2].status,'Interrupted')
+end)
+test('capture segment offsets survive persistence without changing old captures',function()
+  local st=C.new(); st.captures={{id='segments',wall=start,position=100,folder='test',bands={},files={},segments={{offset=0,position=100,finish=3},{offset=3,position=110}}}}
+  local restored=assert(C.deserialize(C.serialize(st)))
+  eq(#restored.captures[1].segments,2); eq(restored.captures[1].segments[2].offset,3); eq(restored.captures[1].segments[2].position,110)
+end)
+test('a slot skipped entirely while paused is not reported as recorded later',function()
+  local st,h,e=rig({slot(),slot{start='21:00',finish='21:10'},slot{start='22:00',finish='23:00'}},'continuous')
+  e:watch(start-1); tick(e,start); tick(e,start+3600)
+  tick(e,start+6600); tick(e,start+9000); tick(e,start+12600)
+  eq(st.slots[2].actual_start,nil); eq(st.slots[2].status,'Interrupted'); eq(st.slots[3].status,'Completed')
 end)
 print(string.format('%d scheduler tests passed.',tests))

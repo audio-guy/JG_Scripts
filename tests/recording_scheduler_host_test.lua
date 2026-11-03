@@ -384,6 +384,60 @@ test('single schedule view, settings, activity window and editor preserve data a
   assert(ok,err); eq(windows,0); eq(disabled,0); eq(tables,0); eq(ids,0)
   files[root..'/session.rpp.jg-scheduler']=true
 end)
+test('pause and resume map source boundaries with the processing cursor',function()
+  local state,position=5,103.25
+  local track={}; local h=H.new({
+    GetPlayStateEx=function() return state end,
+    Main_OnCommandEx=function(cmd) eq(cmd,1008); state=state==5 and 6 or 5; if state==5 then position=103.2 end end,
+    GetPlayPosition2Ex=function() return position end,
+    GetAudioDeviceInfo=function() return true,'48000' end,
+    CountTrackMediaItems=function() return 0 end,
+  },{})
+  h.selected=function() return true end; h.tracks=function() return {track} end; h.expected={track}
+  local c={position=100,wall=1000,recorded_offset=0,resume_position=100,segments={{offset=0,position=100}}}
+  assert(h:pause_capture(c)); eq(c.recorded_offset,3.25); eq(state,6)
+  assert(h:resume_capture(c,1010)); eq(c.segments[2].offset,3.25); eq(c.segments[2].position,110)
+  position=106.2; assert(h:pause_capture(c)); assert(math.abs(c.recorded_offset-6.25)<1e-9)
+end)
+test('shared source items split across file boundaries without rendering or data loss',function()
+  local items={{position=100,length=3,offset=0,path='a.wav'},{position=103,length=3,offset=0,path='b.wav'}}
+  local api={CountTrackMediaItems=function() return #items end,GetTrackMediaItem=function(_,i) return items[i+1] end,
+    GetTake=function(item) return item end,CountTakes=function() return 1 end,
+    GetMediaItemTake_Source=function(t) return t end,GetMediaSourceFileName=function(t) return t.path end,
+    GetMediaItemTakeInfo_Value=function(t,k) return k=='D_PLAYRATE' and 1 or t.offset end,
+    GetMediaItemInfo_Value=function(t,k) return k=='D_POSITION' and t.position or t.length end,
+    SetMediaItemInfo_Value=function(t,k,v) if k=='D_POSITION' then t.position=v end; return true end,
+    SplitMediaItem=function(t,at)
+      local length=at-t.position; local right={position=at,length=t.length-length,offset=t.offset+length,path=t.path}
+      t.length=length; items[#items+1]=right; return right
+    end,
+    Undo_BeginBlock2=function() end,Undo_EndBlock2=function() end,UpdateArrange=function() end,
+  }
+  local h=H.new(api,{}); h.expected={{}}; h.result_files={'a.wav','b.wav'}
+  local c={segments={{offset=0,position=100},{offset=2,position=110},{offset=4,position=120}}}
+  assert(h:place_capture(c)); eq(#items,4)
+  table.sort(items,function(a,b) return a.position<b.position end)
+  eq(items[1].position,100); eq(items[1].length,2)
+  eq(items[2].position,110); eq(items[2].offset,2); eq(items[2].length,1)
+  eq(items[3].position,111); eq(items[3].offset,0); eq(items[3].length,1)
+  eq(items[4].position,120); eq(items[4].offset,1); eq(items[4].length,2)
+end)
+test('generated region ends fit actual captured audio without moving manual boundaries',function()
+  local h,api=rig()
+  local regions={[1]={position=100,finish=103,name='Automatic',color=0},[2]={position=110,finish=114,name='Manual',color=0}}
+  h.regions=function() return regions end
+  api.SetProjectMarker3=function(_,id,_,position,finish,name) regions[id]={position=position,finish=finish,name=name}; return true end
+  local c={position=100,wall=1000,bands={{region=1,position=100,finish=103},{region=2,position=110,finish=113}},files={
+    {track='t',position=100,length=2.997},{track='t',position=110,length=2.997}}}
+  h:finish_regions(c,1013)
+  eq(regions[1].finish,102.997); eq(regions[2].finish,114)
+end)
+test('resume rejects changed sample rate before touching transport',function()
+  local h=H.new({GetPlayStateEx=function() return 6 end,GetAudioDeviceInfo=function() return true,'96000' end,
+    Main_OnCommandEx=function() error('Must not resume') end}, {})
+  local t={}; h.expected={t}; h.tracks=function() return {t} end; h.selected=function() return true end; h.capture_rate=48000
+  local ok,err=h:resume_capture({},1000); assert(not ok and err:find('sample rate'))
+end)
 for path in pairs(files) do os.remove(path) end
 for path in pairs(dirs) do os.remove(path) end
 os.remove(root)

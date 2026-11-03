@@ -1,6 +1,6 @@
 # Direct recording pause probe
 
-Status: native pause/resume confirmed; Scheduler integration pending.
+Status: native pause/resume and Scheduler 2.6.0 integration verified.
 
 Tested on 2026-11-03 with REAPER 7.78+dev0811/macOS-arm64 in an isolated
 instance using a temporary configuration. Two stereo output-recording tracks
@@ -20,15 +20,39 @@ used a generated 440 Hz JSFX signal with master sends disabled.
   appended to the same WAV, but the final item stayed at position 0 with length
   6.016 seconds. Seeking does not automatically create clock-aligned items.
 
-## Remaining integration requirement
+## Source-boundary measurement
 
-Measure the precise recorded-source boundary at each pause before implementing
-item splitting and clock-time placement. The reported audible play position was
-slightly behind the final recorded duration. Do not use wall-clock duration alone
-as a sample boundary. Test process position and available live item lengths in
-an initialized, running audio engine.
+A follow-up probe switched the generated signal from 0.1 to 0.2 while paused.
+The transition occurred at sample frame 145408 (3.029333333 seconds at 48 kHz),
+exactly matching `GetPlayPosition2Ex` at the pause. The audible play cursor was
+3.001291667 seconds and must not be used for this boundary. After each resume,
+the processing cursor's new base is measured; subsequent deltas are accumulated.
 
-The follow-up measurement was interrupted by the Mac becoming locked. Production
-Scheduler behavior has not yet been changed. The disposable probe script is
-`tests/manual/recording_scheduler_pause_probe.lua`; it refuses to run outside its
-isolated resource directory or in a project containing tracks.
+## Integrated Scheduler test
+
+The actual Engine and Host ran three three-second slots with two three-second
+gaps, recording two stereo test tracks. Only preflight was replaced to permit
+synthetic output recording without microphones. Production preflight continues
+to require audio-input recording. Results:
+
+- State sequence: recording, paused, recording, paused, recording, stopped.
+- One WAV per track, with all three slots completed.
+- In one verified run each WAV contained 430592 frames at 48000 Hz (8.970667 seconds).
+- Signal changes occurred at sample frames 143360 and 287232, matching the stored
+  source offsets. Three-second scheduling is wall-clock/defer based, not sample exact.
+- After stopping, each track had three items at the corresponding clock positions.
+  All three referenced the same WAV, with contiguous source offsets and no lost samples.
+- Reading and comparing the complete source bytes before and after item placement
+  confirmed that the original WAVs were unchanged.
+- All six band/track export plans validated successfully against actual audio bounds.
+- A repeat with the final recording-input/sample-rate/collision checks again passed:
+  431616 frames per WAV, three 143872-frame sections, unchanged original bytes.
+- Automated tests additionally cover gap-stop, late/failed resume, external resume,
+  persistence, native file splits, and preserving manually edited region edges.
+
+The repeatable probes are in `tests/manual/`. They require an empty disposable
+project and the isolated `/tmp/jg-pause-probe` resource directory. The integrated
+probe uses a JSFX constant signal with slider1 controlling its level; master sends
+are disabled. These short CoreAudio output-recording tests do not establish
+long-duration or every-hardware/input-latency reliability. REAPER's configured
+file-size limits and splitting preferences still apply.
