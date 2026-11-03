@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.11
+-- @version 2.6.12
 -- @changelog
+--   Remove the retired Shared WAV engine; retain historical plan compatibility.
 --   Remove the duplicate transport header; use REAPER transport to stop a slot.
 --   Open Add slot with Enter in the focused schedule view.
 --   Remove band-folder export; slots already record directly into their own folders.
@@ -49,7 +50,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.11' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.12' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -288,21 +289,14 @@ function Engine:watch(now)
   if pending then self:log(now,'Watching scheduled slots.') end
 end
 function Engine:finalize(now,requested,reason)
-  self:update_session(now)
   local ok,detail=self.host:verify()
-  if self.capture and self.host.capture_files then
-    if ok and self.host.place_capture then ok,detail=self.host:place_capture(self.capture) end
-    self.capture.error=not ok and detail or ''
-    self.capture.files=ok and self.host:capture_files() or {}
-    if self.host.finish_regions then self.host:finish_regions(self.capture,now) end
-  end
   for _,s in ipairs(self.session) do
-    local begin,ending=Core.bounds(s)
-    s.actual_end=self.continuous and math.min(now,ending or now) or now
-    if not s.actual_start or (self.continuous and now<=begin) then s.status='Interrupted'; s.note='Recording stopped before this slot began.'; s.actual_end=nil
+    local _,ending=Core.bounds(s)
+    s.actual_end=now
+    if not s.actual_start then s.status='Interrupted'; s.note='Recording stopped before this slot began.'; s.actual_end=nil
     elseif not ok then s.status='Failed'; s.note=detail
     elseif requested~='Completed' and (not ending or now<ending) then s.status=requested; s.note=reason
-    elseif s.note~='' or (self.continuous and self.active.note~='') then s.status='Partial'; s.note=s.note~='' and s.note or self.active.note
+    elseif s.note~='' then s.status='Partial'
     else s.status='Completed'; s.note='Recording verified on every expected track. Review the captured content.' end
     self:log(now,Core.folder(s)..': '..s.status..'. '..(s.note or ''))
   end
@@ -315,46 +309,22 @@ function Engine:finalize(now,requested,reason)
       self:log(now,problem)
     end
   end
-  self.session={}; self.active=nil; self.capture=nil; self.continuous=false; self.gap_paused=false
-end
-function Engine:update_session(now)
-  if not self.continuous then return end
-  for _,s in ipairs(self.session) do
-    local begin,ending=Core.bounds(s)
-    local status=now<begin and 'In session' or (ending and now>=ending and 'Captured' or 'Recording')
-    if status=='Recording' and not s.actual_start and not self.gap_paused then s.actual_start=math.max(begin,self.active.actual_start) end
-    if s.status~=status then s.status=status; self.state.revision=self.state.revision+1 end
-  end
+  self.session={}; self.active=nil
 end
 function Engine:start_session(s,now)
-  local continuous=self.state.mode=='continuous'
-  local members={s}; local transport=s
-  if continuous then
-    members={}
-    for _,v in ipairs(self.state.slots) do if v.status=='Scheduled' and v.start>=s.start then members[#members+1]=v end end
-    table.sort(members,function(a,b) return a.start<b.start end)
-    transport=copy(s); transport.name='Shared WAV'; transport.finish=members[#members].finish
-  end
   local ok,err=self.host:preflight(false)
   local origin=self.state.timeline_origin or Core.midnight(now)
-  if ok then ok,err=self.host:start(transport,self.state.root,continuous,now,origin) end
+  if ok then ok,err=self.host:start(s,self.state.root,now,origin) end
   if not ok or not self.host:recording() then
     s.status='Failed'; s.note=err or 'REAPER did not enter recording.'
     self.host:restore(); self:disable(now,Core.folder(s)..': '..s.note); return
   end
   self.state.timeline_origin=origin
-  self.active=transport; self.session=members; self.continuous=continuous; self.gap_paused=false
-  transport.actual_start=now
-  if now-s.start>2 then transport.note='Recording started '..(now-s.start)..' seconds late.' end
-  for _,v in ipairs(members) do v.folder=transport.folder; v.status=continuous and 'In session' or 'Recording' end
-  if continuous then
-    if self.host.begin_capture then
-      self.capture=self.host:begin_capture(members,now)
-      self.state.captures[#self.state.captures+1]=self.capture
-    end
-    self:update_session(now)
-  else s.actual_start=now; self.host:marker(s) end
-  self:log(now,transport.name..': Recording to '..transport.folder)
+  self.active=s; self.session={s}
+  s.actual_start=now; s.status='Recording'
+  if now-s.start>2 then s.note='Recording started '..(now-s.start)..' seconds late.' end
+  self.host:marker(s)
+  self:log(now,s.name..': Recording to '..s.folder)
 end
 function Engine:stop(now,reason)
   self.state.enabled=false
@@ -378,70 +348,37 @@ function Engine:edit_live(id,draft,now)
   if draft.finish and draft.finish<=now then return nil,'End must be in the future. Use the REAPER transport to stop now.' end
   local check={}
   for _,v in ipairs(self.state.slots) do
-    if v==slot or v.status=='Scheduled' or v.status=='In session' or v.status=='Captured' then
+    if v==slot or v.status=='Scheduled' then
       local candidate=copy(v==slot and draft or v); candidate.status='Scheduled'; check[#check+1]=candidate
     end
   end
   local a,b=Core.conflict(check)
   if a then return nil,'Overlap: '..a.name..' / '..b.name..'. Adjust the end before saving.' end
-  if self.capture and self.host.edit_band then
-    local ok,err=self.host:edit_band(self.capture,slot,draft)
-    if not ok then return nil,err end
-  end
   slot.name,slot.finish=draft.name,draft.finish
-  if self.continuous then self.active.finish=self.session[#self.session].finish end
   self:log(now,'Updated running slot: '..slot.name..'. End: '..(slot.finish and os.date('%y%m%d %H:%M:%S',slot.finish) or 'manual stop'))
   return true
 end
 function Engine:append_live(draft,now,trim_id)
   if not self.active then return nil,'The recording has ended. Save the slot again.' end
   if draft.start<=now then return nil,'Start must be in the future.' end
-  if not self.continuous then
-    -- Validate against the running slot as well as the pending plan, without
-    -- changing transport ownership or its recording history during validation.
-    local trial=copy(self.state); trial.slots={}
-    for _,s in ipairs(self.state.slots) do
-      local candidate=copy(s)
-      if s==self.active then candidate.status='Scheduled'; candidate.actual_start=nil end
-      trial.slots[#trial.slots+1]=candidate
+  -- Validate against the running slot as well as the pending plan, without
+  -- changing transport ownership or its recording history during validation.
+  local trial=copy(self.state); trial.slots={}
+  for _,s in ipairs(self.state.slots) do
+    local candidate=copy(s)
+    if s==self.active then candidate.status='Scheduled'; candidate.actual_start=nil end
+    trial.slots[#trial.slots+1]=candidate
+  end
+  local ok,err=Core.apply(trial,{draft},nil,trim_id)
+  if not ok then return nil,err,Core.offer_trim(trial,draft) end
+  for i,s in ipairs(trial.slots) do
+    if s.id==self.active.id then
+      self.active.finish,self.active.post=s.finish,s.post
+      trial.slots[i]=self.active
     end
-    local ok,err=Core.apply(trial,{draft},nil,trim_id)
-    if not ok then return nil,err,Core.offer_trim(trial,draft) end
-    for i,s in ipairs(trial.slots) do
-      if s.id==self.active.id then
-        self.active.finish,self.active.post=s.finish,s.post
-        trial.slots[i]=self.active
-      end
-    end
-    self.state.slots,self.state.next_id=trial.slots,trial.next_id
-    self:log(now,'Added slot during recording: '..draft.name)
-    return true
   end
-  local last=self.session[#self.session]
-  if draft.start<=last.start then return nil,'During recording, add new slots after the last planned slot.' end
-  local needs_trim=not last.finish or last.finish>draft.start
-  if needs_trim and trim_id~=last.id then
-    return nil,'',{id=last.id,name=last.name,finish=draft.start,revision=self.state.revision}
-  end
-  local check={copy(draft)}
-  for _,s in ipairs(self.session) do
-    local v=copy(s); v.status='Scheduled'
-    if v.id==last.id and needs_trim then v.finish=draft.start; v.post=0 end
-    check[#check+1]=v
-  end
-  for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then check[#check+1]=s end end
-  if Core.conflict(check) then return nil,'The new slot overlaps the plan. Adjust its times.' end
-  if self.capture and self.host.append_band then
-    local ok,err=self.host:append_band(self.capture,draft,needs_trim and last or nil)
-    if not ok then return nil,err end
-  end
-  if needs_trim then last.finish=draft.start; last.post=0 end
-  local slot=copy(draft); slot.id=self.state.next_id; self.state.next_id=slot.id+1
-  slot.status='In session'; slot.folder=self.active.folder
-  self.state.slots[#self.state.slots+1]=slot
-  table.sort(self.state.slots,function(a,b) return a.start<b.start end)
-  self.session[#self.session+1]=slot; self.active.finish=slot.finish
-  self:log(now,'Added slot to running capture: '..slot.name)
+  self.state.slots,self.state.next_id=trial.slots,trial.next_id
+  self:log(now,'Added slot during recording: '..draft.name)
   return true
 end
 function Engine:tick(now,mono)
@@ -462,11 +399,8 @@ function Engine:tick(now,mono)
   if self.active then
     local s=self.active
     local paused=self.host.paused and self.host:paused()
-    if paused and not self.gap_paused then
+    if paused then
       self:stop(now,'Recording was paused outside the scheduler. Inspect the recorded duration.'); return true
-    end
-    if self.gap_paused and not paused and self.host:recording() then
-      self:stop(now,'Recording resumed outside the scheduler. Inspect the recorded duration.'); return true
     end
     if not self.host:recording() then
       self:disable(now,'Recording stopped outside the scheduler.')
@@ -481,26 +415,7 @@ function Engine:tick(now,mono)
         end
         if now-ending>2 then s.note='Automatic stop was late by '..(now-ending)..' seconds.' end
         self:finalize(now,'Completed','')
-    elseif self.continuous then
-      local current,nextslot
-      for _,v in ipairs(self.session) do
-        if v.start<=now and (not v.finish or now<v.finish) then current=v
-        elseif v.start>now and not nextslot then nextslot=v end
-      end
-      if not current and nextslot and not self.gap_paused then
-        local ok,err=self.host:pause_capture(self.capture)
-        if not ok then self:stop(now,err); return true end
-        self.gap_paused=true; self:log(now,'Waiting between slots; recording paused.')
-      elseif current and self.gap_paused then
-        if now-current.start>5 or self.clock_hold or not self.host:selected() then
-          self:stop(now,'Could not resume on time in the target project. Remaining slots interrupted.'); return true
-        end
-        local ok,err=self.host:resume_capture(self.capture,now,current.finish)
-        if not ok then self:stop(now,err); return true end
-        self.gap_paused=false; current.actual_start=now; self:log(now,'Recording resumed: '..current.name)
-      end
     end
-    if self.active then self:update_session(now) end
   end
   if self.state.enabled and not self.active then
     for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then
@@ -634,7 +549,7 @@ function Host:save_recorded_midi()
   if self.r.IsProjectDirty(self.project)~=0 then return nil,'MIDI project save could not be confirmed. Save the project before closing REAPER.' end
   return true
 end
-function Host:start(slot,root,continuous,now,origin)
+function Host:start(slot,root,now,origin)
   local r=self.r
   if self:recording() then return nil,'Another recording is already running. It will not be stopped or taken over.' end
   now=now or slot.start; origin=origin or Core.midnight(now)
@@ -651,7 +566,7 @@ function Host:start(slot,root,continuous,now,origin)
       end
     end
   end
-  local folder=continuous and (stamp(slot.start)..' Originals '..self.r.genGuid():gsub('[^%w]','')) or Core.folder(slot)
+  local folder=Core.folder(slot)
   local path=join(self:root_path(root),folder)
   local ok,err=self:writable(path); if not ok then return nil,err end
   local _,oldpath=r.GetSetProjectInfo_String(self.project,'RECORD_PATH','',false)
@@ -660,7 +575,6 @@ function Host:start(slot,root,continuous,now,origin)
   self.expected=self:tracks(); self.baseline=self:source_map(); self.baseline_midi=self:midi_map(); self.midi_needs_save=false
   self.expected_settings={}
   for _,t in ipairs(self.expected) do self.expected_settings[t]={input=r.GetMediaTrackInfo_Value(t,'I_RECINPUT'),mode=r.GetMediaTrackInfo_Value(t,'I_RECMODE')} end
-  local _,rate=r.GetAudioDeviceInfo('SRATE'); self.capture_rate=tonumber(rate)
   local changed=r.GetSetProjectInfo_String(self.project,'RECORD_PATH',path,true)
   if not changed then self:restore(); return nil,'REAPER rejected the recording folder.' end
   r.GetSetProjectInfo_String(self.project,'RECTAG',self.saved.newtag,true)
@@ -669,7 +583,6 @@ function Host:start(slot,root,continuous,now,origin)
     if r.GetPlayStateEx(self.project)~=0 then return nil,'Playback could not be stopped. Recording did not start.' end
   end
   -- Position follows the reference day and project display offset, never the cursor.
-  self.capture_position=position
   r.SetEditCurPos2(self.project,position,false,false)
   self.owns_transport=true
   r.Main_OnCommandEx(1013,0,self.project)
@@ -721,223 +634,6 @@ function Host:restore()
   if not self:recording() then self.owns_transport=false end
 end
 
-function Host:begin_capture(slots,now)
-  local c={id=self.r.genGuid(),wall=now,position=self.capture_position,folder=self.saved.newpath,bands={},files={},
-    segments={{offset=0,position=self.capture_position}},recorded_offset=0,resume_position=self.capture_position}
-  for _,s in ipairs(slots) do
-    local begin,ending=Core.bounds(s)
-    local pos=c.position+math.max(0,begin-now)
-    local finish=ending and c.position+ending-now or pos+1
-    local id=self.r.AddProjectMarker2(self.project,true,pos,finish,s.name,-1,0)
-    assert(id>=0,'Could not create a band region. Recording stopped for review.')
-    c.bands[#c.bands+1]={region=id,start=begin,name=s.name,open=not ending,position=pos,finish=finish}
-  end
-  return c
-end
--- Pause keeps REAPER's source files open. Capture the processing cursor, not the
--- latency-compensated audible cursor: the native probe verifies this boundary.
-function Host:pause_capture(c)
-  if not c or not self:recording() or self:paused() then return nil,'The shared recording is no longer running.' end
-  self.r.Main_OnCommandEx(1008,0,self.project)
-  if not self:recording() or not self:paused() then return nil,'REAPER could not pause recording between slots.' end
-  local elapsed=self.r.GetPlayPosition2Ex(self.project)-c.resume_position
-  if elapsed<=0 then return nil,'The audio engine did not advance. Inspect the recording device.' end
-  c.recorded_offset=c.recorded_offset+elapsed
-  c.segments[#c.segments].finish=c.recorded_offset
-  return true
-end
-function Host:resume_capture(c,now,finish)
-  local r=self.r
-  if not c or not self:recording() or not self:paused() then return nil,'The shared recording is no longer paused.' end
-  if not self:selected() or not r.GetAudioDeviceInfo('SRATE') then return nil,'Select the recording project and check the audio device before continuing.' end
-  local tracks=self:tracks()
-  if #tracks~=#self.expected then return nil,'Armed tracks changed during the shared recording.' end
-  for i,t in ipairs(tracks) do
-    if t~=self.expected[i] then return nil,'Armed tracks changed during the shared recording.' end
-    local original=self.expected_settings and self.expected_settings[t]
-    if original and (r.GetMediaTrackInfo_Value(t,'I_RECINPUT')~=original.input or r.GetMediaTrackInfo_Value(t,'I_RECMODE')~=original.mode) then
-      return nil,'Track recording inputs or modes changed during the shared recording.'
-    end
-  end
-  local _,rate=r.GetAudioDeviceInfo('SRATE')
-  if self.capture_rate and tonumber(rate)~=self.capture_rate then return nil,'The sample rate changed during the shared recording.' end
-  local position=c.position+now-c.wall
-  local ending=finish and c.position+finish-c.wall or math.huge
-  for _,t in ipairs(self.expected) do
-    for i=0,r.CountTrackMediaItems(t)-1 do
-      local item=r.GetTrackMediaItem(t,i); local take=r.GetTake(item,0)
-      local path=take and r.GetMediaSourceFileName(r.GetMediaItemTake_Source(take),'') or ''
-      local own=self.saved and path:sub(1,#self.saved.newpath+1)==self.saved.newpath..'/'
-      local begin=r.GetMediaItemInfo_Value(item,'D_POSITION')
-      if not own and begin<ending and begin+r.GetMediaItemInfo_Value(item,'D_LENGTH')>position then
-        return nil,'Existing media overlaps the next slot. Recording was not resumed.'
-      end
-    end
-  end
-  r.Main_OnCommandEx(1008,0,self.project)
-  if not self:recording() or self:paused() then return nil,'REAPER could not resume recording.' end
-  c.resume_position=r.GetPlayPosition2Ex(self.project)
-  c.segments[#c.segments+1]={offset=c.recorded_offset,position=c.position+now-c.wall}
-  return true
-end
-
--- Split/move only recorded items, never render or rewrite their audio files.
--- Offsets are cumulative recorded time, including native source-file splits.
-function Host:place_capture(c)
-  if not c.segments or #c.segments<2 then return true end
-  local r=self.r; local paths={}; local plans={}; local epsilon=1e-7
-  for _,path in ipairs(self.result_files or {}) do paths[path]=true end
-  for i,g in ipairs(c.segments) do
-    if i>1 and (g.offset<=c.segments[i-1].offset or g.position<c.segments[i-1].position) then
-      return nil,'Invalid recording boundary map. Original items retained for recovery.'
-    end
-  end
-  for _,track in ipairs(self.expected) do
-    local own,other={},{}
-    for i=0,r.CountTrackMediaItems(track)-1 do
-      local item=r.GetTrackMediaItem(track,i); local take=r.GetTake(item,0)
-      local position=r.GetMediaItemInfo_Value(item,'D_POSITION'); local length=r.GetMediaItemInfo_Value(item,'D_LENGTH')
-      if take and paths[r.GetMediaSourceFileName(r.GetMediaItemTake_Source(take),'')] then
-        if r.CountTakes(item)~=1 or r.GetMediaItemTakeInfo_Value(take,'D_PLAYRATE')~=1 or length<=0 then
-          return nil,'Recorded items changed. Restore their original takes and lengths before recovery.'
-        end
-        own[#own+1]={item=item,position=position,length=length}
-      else other[#other+1]={position=position,finish=position+length} end
-    end
-    table.sort(own,function(a,b) return a.position<b.position end)
-    local cursor=0; local index=1
-    for _,v in ipairs(own) do
-      local stop=cursor+v.length; local pieces={}
-      while cursor<stop-epsilon do
-        while c.segments[index+1] and cursor>=c.segments[index+1].offset-epsilon do index=index+1 end
-        local g=c.segments[index]; local boundary=c.segments[index+1] and c.segments[index+1].offset or math.huge
-        local length=math.min(stop,boundary)-cursor
-        local position=g.position+cursor-g.offset
-        for _,o in ipairs(other) do
-          if position<o.finish-epsilon and position+length>o.position+epsilon then
-            return nil,'Existing media overlaps a recorded slot. Original items retained for recovery.'
-          end
-        end
-        pieces[#pieces+1]={position=position,length=length}; cursor=cursor+length
-      end
-      plans[#plans+1]={item=v.item,pieces=pieces}
-    end
-    if #own==0 or cursor<=c.segments[#c.segments].offset then
-      return nil,'A recorded section is missing. Original items retained for recovery.'
-    end
-  end
-  r.Undo_BeginBlock2(self.project)
-  local ok,err=pcall(function()
-    for _,plan in ipairs(plans) do
-      local item=plan.item
-      for i,piece in ipairs(plan.pieces) do
-        local right
-        if i<#plan.pieces then
-          right=r.SplitMediaItem(item,r.GetMediaItemInfo_Value(item,'D_POSITION')+piece.length)
-          assert(right,'REAPER could not split a recorded item. Inspect the project; original WAVs are intact.')
-          r.SetMediaItemInfo_Value(item,'D_FADEOUTLEN',0); r.SetMediaItemInfo_Value(item,'D_FADEOUTLEN_AUTO',0)
-          r.SetMediaItemInfo_Value(right,'D_FADEINLEN',0); r.SetMediaItemInfo_Value(right,'D_FADEINLEN_AUTO',0)
-        end
-        assert(r.SetMediaItemInfo_Value(item,'D_POSITION',piece.position),'REAPER could not place a recorded item. Original WAVs are intact.')
-        item=right
-      end
-    end
-  end)
-  r.Undo_EndBlock2(self.project,'Place shared recording at slot clock times',-1)
-  r.UpdateArrange()
-  if not ok then return nil,tostring(err) end
-  return true
-end
-
-function Host:append_band(c,draft,previous)
-  local pos=c.position+draft.start-c.wall
-  local ending=draft.finish and c.position+draft.finish-c.wall or pos+1
-  local id=self.r.AddProjectMarker2(self.project,true,pos,ending,draft.name,-1,0)
-  if id<0 then return nil,'REAPER could not create the new band region. The slot was not added.' end
-  if previous then
-    local shortened=copy(previous); shortened.finish=draft.start
-    local ok,err=self:edit_band(c,previous,shortened)
-    if not ok then self.r.DeleteProjectMarker(self.project,id,true); return nil,err end
-  end
-  c.bands[#c.bands+1]={region=id,start=draft.start,name=draft.name,open=not draft.finish,position=pos,finish=ending}
-  return true
-end
-function Host:regions()
-  local regions={}; local i=0
-  while true do
-    local ok,isregion,pos,finish,name,id,color=self.r.EnumProjectMarkers3(self.project,i)
-    if ok==0 then break end
-    if isregion then regions[id]={position=pos,finish=finish,name=name,color=color} end
-    i=i+1
-  end
-  return regions
-end
-function Host:edit_band(c,slot,draft)
-  local regions=self:regions()
-  for _,band in ipairs(c.bands) do if band.start==slot.start then
-    local region=regions[band.region]
-    if not region then return nil,'The band region is missing. Restore it before editing this recording.' end
-    local ending=draft.finish and c.position+draft.finish-c.wall or region.finish
-    if ending<=region.position then return nil,'The new end is before the edited region start.' end
-    if not self.r.SetProjectMarker3(self.project,band.region,true,region.position,ending,draft.name,region.color or 0) then
-      return nil,'REAPER could not update the band region. The slot was not changed.'
-    end
-    band.name=draft.name; band.open=not draft.finish; band.position=region.position; band.finish=ending
-    return true
-  end end
-  return nil,'No linked band region was found for this slot.'
-end
-function Host:finish_regions(c,now)
-  local regions=self:regions()
-  for _,b in ipairs(c.bands) do
-    local region=regions[b.region]
-    if region then
-      local position,ending=region.position,region.finish
-      if b.open then ending=math.max(position+0.001,c.position+now-c.wall) end
-      -- Fit generated boundaries to captured audio. Preserve manually moved edges.
-      -- Native record buffers need not end exactly at the scheduled wall second.
-      local tracks={}
-      for _,f in ipairs(c.files or {}) do
-        if f.position<ending and f.position+f.length>position then
-          local t=tracks[f.track] or {first=math.huge,last=-math.huge}
-          t.first=math.min(t.first,f.position); t.last=math.max(t.last,f.position+f.length); tracks[f.track]=t
-        end
-      end
-      local first,last=-math.huge,math.huge; local found=false
-      for _,t in pairs(tracks) do found=true; first=math.max(first,t.first); last=math.min(last,t.last) end
-      if found then
-        if b.position and math.abs(position-b.position)<1e-7 then position=math.max(position,first) end
-        if b.open or (b.finish and math.abs(region.finish-b.finish)<1e-7) then ending=math.min(ending,last) end
-      end
-      if ending>position and (ending~=region.finish or position~=region.position) then
-        self.r.SetProjectMarker3(self.project,b.region,true,position,ending,region.name,region.color or 0)
-      end
-    end
-  end
-end
-function Host:capture_files()
-  local r=self.r; local result={}; local paths={}
-  for _,path in ipairs(self.result_files or {}) do paths[path]=true end
-  for _,track in ipairs(self.expected) do
-    local _,name=r.GetTrackName(track,''); local guid=r.GetTrackGUID(track)
-    for i=0,r.CountTrackMediaItems(track)-1 do
-      local item=r.GetTrackMediaItem(track,i)
-      for j=0,r.CountTakes(item)-1 do
-        local take=r.GetTake(item,j)
-        if take and not r.TakeIsMIDI(take) then
-          local path=r.GetMediaSourceFileName(r.GetMediaItemTake_Source(take),'')
-          if paths[path] then
-            if r.GetMediaItemTakeInfo_Value(take,'D_PLAYRATE')~=1 then return {} end
-            local directory=self:project_file():match('^(.*)[/\\]')
-            local stored_path=directory and path:sub(1,#directory+1)==directory..'/' and path:sub(#directory+2) or path
-            result[#result+1]={track=guid,name=name,path=stored_path,position=r.GetMediaItemInfo_Value(item,'D_POSITION'),length=r.GetMediaItemInfo_Value(item,'D_LENGTH'),offset=r.GetMediaItemTakeInfo_Value(take,'D_STARTOFFS')}
-          end
-        end
-      end
-    end
-  end
-  return result
-end
 local function run(r)
   if not r.ImGui_CreateContext then r.ShowMessageBox('Install ReaImGui via ReaPack, then run Recording Scheduler again.','Recording Scheduler',0); return end
   local project=r.EnumProjects(-1,''); local host=Host.new(r,project)

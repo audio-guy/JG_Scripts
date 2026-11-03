@@ -66,7 +66,7 @@
   share label and input table rows so their baselines remain aligned.
 
 - Allow editing the currently recording slot's name and end, with a fixed start.
-  Update its linked region and effective stop together; reject past ends/overlaps.
+  Update the slot list and effective stop together; reject past ends/overlaps.
   No Extend by 5 min control. Keep historical slots and active transport protected.
 
 - Blank names default to Slot N using the slot number. Allow Add slot during recording. Each added slot retains its independent folder. Confirm any predecessor shortening

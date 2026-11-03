@@ -52,7 +52,7 @@ test('timeline placement honors project offset and actual late start',function()
   local h,api=rig(); local position
   api.GetProjectTimeOffset=function() return 3600 end
   api.SetEditCurPos2=function(_,value) position=value end
-  local s=slot(); assert(h:start(s,'',false,s.start+3,C.midnight(s.start)))
+  local s=slot(); assert(h:start(s,'',s.start+3,C.midnight(s.start)))
   eq(position,70203-3600)
 end)
 test('next-day slots keep their chronological timeline position',function()
@@ -60,7 +60,7 @@ test('next-day slots keep their chronological timeline position',function()
   api.SetEditCurPos2=function(_,value) position=value end
   local first=assert(C.datetime('261102','23:00'))
   local s=assert(C.make{name='Next day',date='261103',start='0052',finish='0053'})
-  assert(h:start(s,'',false,s.start,C.midnight(first))); eq(position,86400+3120)
+  assert(h:start(s,'',s.start,C.midnight(first))); eq(position,86400+3120)
 end)
 test('overlapping media blocks recording before any settings or transport change',function()
   local h,api,cfg,sources,commands=rig(); sources[1]='existing.wav'
@@ -125,63 +125,6 @@ test('adapter accepts MIDI input but rejects disconnected device and loops',func
 end)
 test('write failure prevents start',function()
   local h,api,cfg,sources,commands=rig(); h.writable=function() return nil,'Disk unavailable' end; assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
-end)
-test('legacy continuous host creates linked regions and captures original source positions',function()
-  local h,api,cfg,sources,commands=rig(); local st=C.new(); st.mode='continuous'
-  local a=slot('Band A'); a.finish=a.start+2
-  local b=slot('Band B'); b.start=a.start+4; b.finish=a.start+6
-  assert(C.apply(st,{a,b})); local regions={}
-  api.AddProjectMarker2=function(project,isregion,pos,finish,name)
-    assert(isregion); local id=#regions+1; regions[id]={pos=pos,finish=finish,name=name}; return id
-  end
-  api.EnumProjectMarkers3=function(_,i) local r=regions[i+1]; if not r then return 0 end; return 1,true,r.pos,r.finish,r.name,i+1,0 end
-  api.SetProjectMarker3=function(_,id,isregion,pos,finish,name)
-    assert(isregion); regions[id]={pos=pos,finish=finish,name=name}; return true
-  end
-  api.GetTrackName=function() return true,'Input' end; api.GetTrackGUID=function() return '{track}' end
-  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 70200 or 8 end
-  api.GetMediaItemTakeInfo_Value=function(_,key) return key=='D_PLAYRATE' and 1 or 0 end
-  local e=E.new(st,h); e:watch(a.start-10); e:tick(a.start,0)
-  eq(#commands,1); eq(#regions,2); eq(regions[1].pos,70200); eq(regions[2].pos,70204)
-  eq(#st.captures,1); eq(st.captures[1].bands[2].region,2)
-  local draft={}; for k,v in pairs(st.slots[1]) do draft[k]=v end
-  draft.name='Band A revised'; draft.finish=a.start+3
-  assert(e:edit_live(st.slots[1].id,draft,a.start+1)); eq(regions[1].finish,70203); eq(regions[1].name,'Band A revised')
-  e:tick(a.start+4,4); eq(h:recording(),true)
-  draft={}; for k,v in pairs(st.slots[2]) do draft[k]=v end; draft.finish=a.start+8
-  assert(e:edit_live(st.slots[2].id,draft,a.start+4)); eq(regions[2].finish,70208)
-  eq(e.active.finish,a.start+8)
-  local path=cfg.RECORD_PATH..'/input.wav'; write(path,'recorded audio'); sources[1]=path
-  e:tick(a.start+6,6); eq(h:recording(),true)
-  e:tick(a.start+8,8); eq(h:recording(),false); eq(#commands,1)
-  eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed')
-  local c=assert(C.deserialize(C.serialize(st))).captures[1]
-  eq(c.files[1].position,70200); eq(c.files[1].length,8); eq(c.files[1].offset,0)
-  eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
-end)
-test('appended band region and confirmed previous end update together',function()
-  local h,api=rig(); local regions={{pos=100,finish=101,name='First'}}
-  api.EnumProjectMarkers3=function(_,i) local v=regions[i+1]; if not v then return 0 end; return 1,true,v.pos,v.finish,v.name,i+1,0 end
-  api.AddProjectMarker2=function(_,_,pos,finish,name) regions[#regions+1]={pos=pos,finish=finish,name=name}; return #regions end
-  api.SetProjectMarker3=function(_,id,_,pos,finish,name) regions[id]={pos=pos,finish=finish,name=name}; return true end
-  local c={position=100,wall=1000,bands={{region=1,start=1000,name='First',open=true}}}
-  assert(h:append_band(c,{start=1010,finish=1020,name='Second'},{start=1000,name='First'}))
-  eq(#c.bands,2); eq(regions[1].finish,110); eq(regions[2].pos,110); eq(regions[2].finish,120)
-  eq(c.bands[1].open,false)
-end)
-test('manual stop closes only open-ended band regions and preserves edited names',function()
-  local h,api=rig(); local updated={}
-  api.EnumProjectMarkers3=function(_,i)
-    if i==0 then return 1,true,100,101,'Edited band name',7,123 end
-    if i==1 then return 1,true,200,220,'Fixed band',8,456 end
-    return 0
-  end
-  api.SetProjectMarker3=function(_,id,isregion,pos,finish,name,color)
-    updated[#updated+1]={id=id,finish=finish,name=name,color=color}; return true
-  end
-  h:finish_regions({position=100,wall=1000,bands={{region=7,open=true},{region=8,open=false}}},1042)
-  eq(#updated,1); eq(updated[1].id,7); eq(updated[1].finish,142)
-  eq(updated[1].name,'Edited band name'); eq(updated[1].color,123)
 end)
 test('full collapsed UI executes actual scheduled start and stop',function()
   local h,api,cfg,sources,commands=rig(); local p=api.EnumProjects(-1); local st=C.new(); st.mode='separate'; assert(C.apply(st,{slot('Loop test')}))
@@ -394,60 +337,6 @@ test('single schedule view, settings, activity window and editor preserve data a
   for _,f in ipairs(exits) do f() end
   assert(ok,err); eq(windows,0); eq(disabled,0); eq(tables,0); eq(ids,0)
   files[root..'/session.rpp.jg-scheduler']=true
-end)
-test('pause and resume map source boundaries with the processing cursor',function()
-  local state,position=5,103.25
-  local track={}; local h=H.new({
-    GetPlayStateEx=function() return state end,
-    Main_OnCommandEx=function(cmd) eq(cmd,1008); state=state==5 and 6 or 5; if state==5 then position=103.2 end end,
-    GetPlayPosition2Ex=function() return position end,
-    GetAudioDeviceInfo=function() return true,'48000' end,
-    CountTrackMediaItems=function() return 0 end,
-  },{})
-  h.selected=function() return true end; h.tracks=function() return {track} end; h.expected={track}
-  local c={position=100,wall=1000,recorded_offset=0,resume_position=100,segments={{offset=0,position=100}}}
-  assert(h:pause_capture(c)); eq(c.recorded_offset,3.25); eq(state,6)
-  assert(h:resume_capture(c,1010)); eq(c.segments[2].offset,3.25); eq(c.segments[2].position,110)
-  position=106.2; assert(h:pause_capture(c)); assert(math.abs(c.recorded_offset-6.25)<1e-9)
-end)
-test('shared source items split across file boundaries without rendering or data loss',function()
-  local items={{position=100,length=3,offset=0,path='a.wav'},{position=103,length=3,offset=0,path='b.wav'}}
-  local api={CountTrackMediaItems=function() return #items end,GetTrackMediaItem=function(_,i) return items[i+1] end,
-    GetTake=function(item) return item end,CountTakes=function() return 1 end,
-    GetMediaItemTake_Source=function(t) return t end,GetMediaSourceFileName=function(t) return t.path end,
-    GetMediaItemTakeInfo_Value=function(t,k) return k=='D_PLAYRATE' and 1 or t.offset end,
-    GetMediaItemInfo_Value=function(t,k) return k=='D_POSITION' and t.position or t.length end,
-    SetMediaItemInfo_Value=function(t,k,v) if k=='D_POSITION' then t.position=v end; return true end,
-    SplitMediaItem=function(t,at)
-      local length=at-t.position; local right={position=at,length=t.length-length,offset=t.offset+length,path=t.path}
-      t.length=length; items[#items+1]=right; return right
-    end,
-    Undo_BeginBlock2=function() end,Undo_EndBlock2=function() end,UpdateArrange=function() end,
-  }
-  local h=H.new(api,{}); h.expected={{}}; h.result_files={'a.wav','b.wav'}
-  local c={segments={{offset=0,position=100},{offset=2,position=110},{offset=4,position=120}}}
-  assert(h:place_capture(c)); eq(#items,4)
-  table.sort(items,function(a,b) return a.position<b.position end)
-  eq(items[1].position,100); eq(items[1].length,2)
-  eq(items[2].position,110); eq(items[2].offset,2); eq(items[2].length,1)
-  eq(items[3].position,111); eq(items[3].offset,0); eq(items[3].length,1)
-  eq(items[4].position,120); eq(items[4].offset,1); eq(items[4].length,2)
-end)
-test('generated region ends fit actual captured audio without moving manual boundaries',function()
-  local h,api=rig()
-  local regions={[1]={position=100,finish=103,name='Automatic',color=0},[2]={position=110,finish=114,name='Manual',color=0}}
-  h.regions=function() return regions end
-  api.SetProjectMarker3=function(_,id,_,position,finish,name) regions[id]={position=position,finish=finish,name=name}; return true end
-  local c={position=100,wall=1000,bands={{region=1,position=100,finish=103},{region=2,position=110,finish=113}},files={
-    {track='t',position=100,length=2.997},{track='t',position=110,length=2.997}}}
-  h:finish_regions(c,1013)
-  eq(regions[1].finish,102.997); eq(regions[2].finish,114)
-end)
-test('resume rejects changed sample rate before touching transport',function()
-  local h=H.new({GetPlayStateEx=function() return 6 end,GetAudioDeviceInfo=function() return true,'96000' end,
-    Main_OnCommandEx=function() error('Must not resume') end}, {})
-  local t={}; h.expected={t}; h.tracks=function() return {t} end; h.selected=function() return true end; h.capture_rate=48000
-  local ok,err=h:resume_capture({},1000); assert(not ok and err:find('sample rate'))
 end)
 test('MIDI verification requires new events and saves after restoring the destination',function()
   local h,api,cfg,sources=rig()

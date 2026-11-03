@@ -3,7 +3,8 @@
 Status: native pause/resume and Scheduler 2.6.0 integration verified.
 The recording mode was withdrawn in 2.6.1: the continuing live item cannot appear
 at each slot's clock position until capture ends. Separate slots are now the only
-available recording workflow. This document retains the experimental evidence.
+available recording workflow. This document retains the experimental evidence. The retired Scheduler engine and
+its integration probe were removed in 2.6.12; the standalone native pause probe remains.
 
 Tested on 2026-11-03 with REAPER 7.78+dev0811/macOS-arm64 in an isolated
 instance using a temporary configuration. Two stereo output-recording tracks

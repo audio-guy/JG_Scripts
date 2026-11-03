@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.11
+# Recording Scheduler 2.6.12
 
 ## Purpose
 
@@ -94,7 +94,7 @@ not trigger this additional project save.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.11).
+The window title shows the running version (for example, Recording Scheduler v2.6.12).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -131,7 +131,7 @@ Add slot stays available during recording. New slots are scheduled with their ow
 folders; saving does not interrupt the current recording.
 A running or planned predecessor can be shortened at the new start only after
 explicit confirmation. Conflicts with other slots are rejected before changing the
-plan or regions. Adding during capture clears the Undo snapshot.
+plan. Adding during capture clears the Undo snapshot.
 Deleting, duplicating and undoing plan changes remain locked during capture. Completed recording history cannot be edited.
 If a recording ends while its editor is open, saving is rejected. Live edits clear
 the plan Undo snapshot to prevent restoring stale recording state.
@@ -220,7 +220,9 @@ luac -p Tools/JG_Recording_Scheduler.lua
 The tests use the real parser, state machine, storage, adapter and GUI loop with a
 mock REAPER host. They cover timing, migration, dedicated folders, ownership,
 file verification, cancelled edits and project-directory destination placement.
-The native two-track/three-slot test and its limitations are documented in
+The retired Shared WAV engine and its integration probe were removed in 2.6.12.
+Historical capture metadata still round-trips through storage without changing audio.
+The historical native two-track/three-slot experiment and its limitations are documented in
 [the pause test report](recording-scheduler-pause-test.md). Tests with the intended
 input hardware remain necessary before unattended use; output-recording probes
 cannot validate every driver's latency compensation or disk behavior.
