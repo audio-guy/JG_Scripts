@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.2
+# Recording Scheduler 2.5.3
 
 ## Purpose
 
@@ -25,14 +25,19 @@ picker; without it, the destination can still be entered manually.
 2. In **Recording settings**, choose the recording mode and destination with **Choose folder...**.
    **Use project folder** uses the effective project recording path instead.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
-   For overnight recordings, enter the next end date. **Open end**
-   explicitly leaves the end to a manual stop.
+   For overnight recordings, enter the next end date. Leave the end time blank
+   for manual stop; there is no Open end checkbox.
 4. Saving schedules the slot automatically. Use Duplicate to add another similar slot.
    **Pause schedule** suspends future starts; **Resume schedule** restores them.
 
 Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
 for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
-Overlaps are rejected without changing the existing plan.
+Overlaps never silently change the plan. When the new start falls inside the
+previous scheduled slot (including an open-ended slot), the editor offers to end
+that slot at the new start. **Shorten and save** applies both changes together;
+**Keep editing** leaves the plan unchanged. Undo restores both changes. Equal
+starts, additional conflicts and already recorded slots require manual correction.
+If the schedule changes while confirmation is open, it must be reviewed again.
 Saving a slot or resuming requires a saved REAPER project. A rejected draft stays
 open so it can be saved after saving the project. Readiness issues are shown before
 the first start; the start-time safety check still runs.
@@ -113,7 +118,7 @@ capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.2).
+The window title shows the running version (for example, Recording Scheduler v2.5.3).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -144,8 +149,10 @@ Otherwise closing directly disables future starts and retains the plan.
 
 ## Readiness and limitations
 
-The automatic check verifies the saved/selected project, stopped transport, armed
-audio-input tracks, open audio device, and disabled looping. Destination folders
+The automatic check verifies the saved/selected project, absence of another
+recording, armed audio-input tracks, open audio device, and disabled looping.
+Normal or paused playback is stopped automatically immediately before seeking and
+starting the scheduled recording. If stopping fails, no recording command is sent. Destination folders
 are created and write-tested at each actual start. Existing manual
 recordings are never taken over. Recordings use clock-aligned timeline positions;
 collisions with existing media on armed tracks block the start.

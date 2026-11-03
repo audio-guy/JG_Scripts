@@ -54,3 +54,9 @@
 - Place scheduled recordings by clock time relative to a persisted midnight reference
   day, respecting project time offsets. Never append based on cursor/project length.
   Keep following days chronological and reject collisions on armed tracks.
+
+- A blank end time means open-ended recording; no Open end checkbox. Nonblank
+  invalid times remain errors. Offer to shorten a scheduled predecessor at a new
+  slot's start only with explicit confirmation; apply both changes atomically.
+- Ordinary playback must not block scheduled recording: stop it before positioning
+  and starting. Never stop or take over an existing recording.

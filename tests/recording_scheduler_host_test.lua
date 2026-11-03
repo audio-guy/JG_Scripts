@@ -91,8 +91,32 @@ end)
 test('adapter stop remains bound after project switch',function()
   local h,api,cfg,sources,commands,switch,stops=rig(); assert(h:start(slot(),'')); switch(); assert(not h:preflight()); h:stop(); eq(stops(),1); h:restore()
 end)
-test('adapter rejects pre-existing transport and zero armed tracks',function()
+test('adapter rejects pre-existing recording and zero armed tracks',function()
   local h,api=rig(); api.GetPlayStateEx=function() return 5 end; assert(not h:preflight()); api.GetPlayStateEx=function() return 0 end; api.CountTracks=function() return 0 end; assert(not h:preflight())
+end)
+test('ordinary playback is stopped before seeking and recording',function()
+  for _,playstate in ipairs{1,2,3} do
+    local h,api,cfg,sources,commands=rig(); local playing=true; local events={}
+    local state,stop,seek,record=api.GetPlayStateEx,api.OnStopButtonEx,api.SetEditCurPos2,api.Main_OnCommandEx
+    api.GetPlayStateEx=function(p) return playing and playstate or state(p) end
+    api.OnStopButtonEx=function(p) events[#events+1]='stop'; playing=false; stop(p) end
+    api.SetEditCurPos2=function(...) events[#events+1]='seek'; seek(...) end
+    api.Main_OnCommandEx=function(...) events[#events+1]='record'; record(...) end
+    assert(h:preflight()); eq(#events,0); assert(h:start(slot(),''))
+    eq(table.concat(events,','),'stop,seek,record'); eq(#commands,1)
+  end
+end)
+test('external recording is never stopped or taken over even after preflight',function()
+  local h,api,cfg,sources,commands=rig(); assert(h:preflight())
+  api.GetPlayStateEx=function() return 5 end
+  api.OnStopButtonEx=function() error('Must not stop an external recording') end
+  assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
+end)
+test('failed playback stop prevents the recording command',function()
+  local h,api,cfg,sources,commands=rig(); api.GetPlayStateEx=function() return 1 end
+  api.OnStopButtonEx=function() end
+  local ok,err=h:start(slot(),''); assert(not ok and err:find('Playback could not be stopped')); eq(#commands,0)
+  h:restore(); eq(cfg.RECORD_PATH,'original')
 end)
 test('adapter rejects disconnected device, loops and MIDI inputs',function()
   local h,api=rig(); api.GetAudioDeviceInfo=function() return false,'' end; assert(not h:preflight()); api.GetAudioDeviceInfo=function() return true,'48000' end
@@ -193,7 +217,7 @@ test('single schedule view, settings, activity window and editor preserve data a
     return false
   end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
-  api.ImGui_Checkbox=function(_,_,value) return false,value end
+  api.ImGui_Checkbox=function(_,label,value) assert(label~='Open end'); return false,value end
   api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
   api.ImGui_Combo=api.ImGui_Checkbox
   api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
@@ -221,6 +245,15 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Add slot'); frame()
     frame('Save slot',{['##name']='Overlap attempt',['##date']='301102',['##enddate']='301102',['##start']='21:30',['##finish']='22:30'})
     assert(shown['Overlap: Future capture / Overlap attempt. Adjust the times before saving.'], 'Save rejection must be visible immediately beside the form action')
+    eq(#captured.state.slots,2); frame(); assert(shown['Shorten and save'])
+    captured.state.revision=captured.state.revision+1
+    frame('Shorten and save'); eq(#captured.state.slots,2)
+    assert(shown['The schedule changed. Save again to review the overlap.'])
+    frame('Save slot'); frame('Shorten and save'); frame()
+    eq(#captured.state.slots,3); assert(shown['Add slot'] and not shown['##name'])
+    eq(captured.state.slots[2].finish,captured.state.slots[3].start)
+    frame('Undo'); eq(#captured.state.slots,2)
+
     frame('Cancel')
     frame('Pause schedule'); eq(captured.state.enabled,false)
     frame('Add slot'); frame()
@@ -257,6 +290,9 @@ test('single schedule view, settings, activity window and editor preserve data a
     h.project_file=project_file
     frame('Save slot'); eq(#captured.state.slots,4)
     frame('Resume schedule'); eq(captured.state.enabled,true)
+    frame('Add slot'); frame('Save slot',{['##name']='Open end test',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
+    frame(); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
+    frame('Undo')
     frame('Pause schedule'); frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
     frame(); eq(captured.state.mode,'continuous')

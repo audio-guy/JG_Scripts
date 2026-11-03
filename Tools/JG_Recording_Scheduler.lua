@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.2
+-- @version 2.5.3
 -- @changelog
+--   Treat blank end times as open-ended; offer confirmed shortening of an overlapping predecessor.
+--   Stop ordinary playback automatically before a scheduled recording; protect existing recordings.
 --   Replace tabs with one schedule view, collapsible settings and an optional activity window.
 --   Remove Recording help.
 --   Place recordings by clock time on the timeline; preserve a project reference day.
@@ -26,7 +28,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.2' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.3' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -81,7 +83,7 @@ function Core.make(form)
   if trim(form.name)=='' then return nil,'Enter a slot name.' end
   local start,err=Core.datetime(form.date,form.start); if not start then return nil,err end
   local finish
-  if not form.open then
+  if trim(form.finish or '')~='' then
     local enddate=trim(form.enddate or '')
     if enddate=='' then enddate=form.date end
     finish,err=Core.datetime(enddate,form.finish or '')
@@ -108,12 +110,20 @@ end
 function Core.can_edit(s)
   return not s.actual_start and (s.status=='Scheduled' or s.status=='Missed')
 end
-function Core.apply(state, additions, replace_id)
-  local nextslots={}
+function Core.apply(state, additions, replace_id, trim_id)
+  local nextslots={}; local trimmed=not trim_id
   for _,s in ipairs(state.slots) do
+    if s.id==trim_id then
+      local draft=additions[1]; local begin,ending=Core.bounds(s)
+      if #additions~=1 or s.id==replace_id or not Core.can_edit(s) or s.status~='Scheduled' or begin>=draft.start or (ending and ending<=draft.start) then
+        return nil,'The overlapping slot changed. Review the times again.'
+      end
+      s=copy(s); s.finish=draft.start; s.post=0; trimmed=true
+    end
     if s.id~=replace_id then nextslots[#nextslots+1]=s
     elseif not Core.can_edit(s) then return nil,'This slot has already run or attempted to record. Duplicate it to schedule another recording.' end
   end
+  if not trimmed then return nil,'The overlapping slot no longer exists.' end
   for _,s in ipairs(additions) do nextslots[#nextslots+1]=copy(s) end
   local a,b=Core.conflict(nextslots)
   if a then return nil,'Overlap: '..a.name..' / '..b.name..'. Adjust the times before saving.' end
@@ -124,6 +134,18 @@ function Core.apply(state, additions, replace_id)
   table.sort(nextslots,function(x,y) return x.start<y.start end)
   state.slots=nextslots; state.next_id=nextid; state.revision=state.revision+1
   return true
+end
+
+function Core.offer_trim(state,draft,replace_id)
+  for _,previous in ipairs(state.slots) do
+    local begin,ending=Core.bounds(previous)
+    if previous.id~=replace_id and previous.status=='Scheduled' and begin<draft.start and (not ending or ending>draft.start) then
+      local trial=copy(state)
+      if Core.apply(trial,{draft},replace_id,previous.id) then
+        return {id=previous.id,name=previous.name,finish=draft.start,revision=state.revision}
+      end
+    end
+  end
 end
 
 -- A versioned, escaped data format; never execute stored project data as Lua.
@@ -389,7 +411,7 @@ function Host:preflight(enabling)
   if not self:valid() then return nil,'The target project has been closed.' end
   if not self:selected() then return nil,'Select the target project before starting the schedule.' end
   if self:project_file()=='' then return nil,'Save the REAPER project before scheduling.' end
-  if r.GetPlayStateEx(self.project)~=0 then return nil,'Stop the transport first. Existing recordings are never taken over.' end
+  if (r.GetPlayStateEx(self.project)&4)~=0 then return nil,'Another recording is already running. It will not be stopped or taken over.' end
   local tracks=self:tracks()
   if #tracks==0 then return nil,'Arm at least one audio track.' end
   for _,t in ipairs(tracks) do
@@ -459,6 +481,7 @@ function Host:source_map()
 end
 function Host:start(slot,root,continuous,now,origin)
   local r=self.r
+  if self:recording() then return nil,'Another recording is already running. It will not be stopped or taken over.' end
   now=now or slot.start; origin=origin or Core.midnight(now)
   local position=now-origin-r.GetProjectTimeOffset(self.project,false)
   if position<0 then return nil,'The recording time is before the project timeline start. Adjust the project start time.' end
@@ -483,6 +506,10 @@ function Host:start(slot,root,continuous,now,origin)
   local changed=r.GetSetProjectInfo_String(self.project,'RECORD_PATH',path,true)
   if not changed then self:restore(); return nil,'REAPER rejected the recording folder.' end
   r.GetSetProjectInfo_String(self.project,'RECTAG',self.saved.newtag,true)
+  if r.GetPlayStateEx(self.project)~=0 then
+    r.OnStopButtonEx(self.project)
+    if r.GetPlayStateEx(self.project)~=0 then return nil,'Playback could not be stopped. Recording did not start.' end
+  end
   -- Position follows the reference day and project display offset, never the cursor.
   self.capture_position=position
   r.SetEditCurPos2(self.project,position,false,false)
@@ -743,10 +770,11 @@ local function run(r)
   if not loaderr and not state.paused and host:project_file()~='' then engine:watch(os.time()) end
   local pause_requested=state.paused or false
   local ctx=r.ImGui_CreateContext('Recording Scheduler',r.ImGui_ConfigFlags_NavEnableKeyboard())
-  local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',open=false,pre='0',post='0'}
+  local form={date=os.date('%y%m%d'),start='',enddate=os.date('%y%m%d'),finish='',name='',pre='0',post='0'}
   local editing=nil; local error=loaderr or ''
   local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
   local export_preview,export_task=nil,nil
+  local pending_trim=nil
   local undo=nil
   local function save()
     if not host:valid() then return end
@@ -767,14 +795,14 @@ local function run(r)
     sidecar=file~='' and file..'.jg-scheduler' or nil
   end
   local function snapshot() undo=Core.serialize(state) end
-  local function clear_form() editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
+  local function clear_form() pending_trim=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not engine.active and not export_task end
   local function setup_editable() return not state.enabled and not engine.active and not export_task end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
   local function edit(s,duplicate)
     editing=not duplicate and s.id or nil
     s=copy(s); s.start,s.finish=Core.bounds(s); s.pre,s.post=0,0
-    form={date=os.date('%y%m%d',s.start),start=clocktime(s.start),enddate=os.date('%y%m%d',s.finish or s.start),finish=s.finish and clocktime(s.finish) or '',name=s.name,open=not s.finish,pre=tostring(s.pre),post=tostring(s.post)}
+    form={date=os.date('%y%m%d',s.start),start=clocktime(s.start),enddate=os.date('%y%m%d',s.finish or s.start),finish=s.finish and clocktime(s.finish) or '',name=s.name,pre=tostring(s.pre),post=tostring(s.post)}
     error=duplicate and 'Choose a new date/time for this duplicate.' or ''
   end
   local function export()
@@ -806,6 +834,7 @@ local function run(r)
     r.ImGui_SetNextItemWidth(ctx,-1)
     local changed,value=r.ImGui_InputText(ctx,'##'..key,form[key])
     if changed then
+      pending_trim=nil
       -- Keep same-day dates in sync until the user deliberately chooses another end date.
       if key=='date' and form.enddate==form.date then form.enddate=value end
       form[key]=value
@@ -816,7 +845,7 @@ local function run(r)
     if s then edit(s,duplicate) else clear_form(); form.date=os.date('%y%m%d'); form.enddate=form.date end
     editor_open=true
   end
-  local function commit_form(now)
+  local function commit_form(now,confirm_trim)
     if host:project_file()=='' then
       error='Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'
       return
@@ -825,12 +854,18 @@ local function run(r)
     if s then
       if s.start<=now then err='Start must be in the future.'
       else
-        snapshot()
-        local ok; ok,err=Core.apply(state,{s},editing)
+        if confirm_trim and (not pending_trim or pending_trim.revision~=state.revision) then
+          pending_trim=nil; error='The schedule changed. Save again to review the overlap.'; return
+        end
+        local before=Core.serialize(state)
+        local ok; ok,err=Core.apply(state,{s},editing,confirm_trim and pending_trim.id or nil)
         if ok then
+          undo=before
           selected_id=state.next_id-1; clear_form(); editor_open=false
           save()
           if not pause_requested and not loaderr and not host.storage_error then engine:watch(now) end
+        else
+          pending_trim=Core.offer_trim(state,s,editing)
         end
       end
     end
@@ -845,13 +880,12 @@ local function run(r)
       r.ImGui_TableNextColumn(ctx); field('Start time  /  HH:MM','start')
       r.ImGui_TableNextRow(ctx)
       r.ImGui_TableNextColumn(ctx)
-      r.ImGui_BeginDisabled(ctx,form.open); field('End date  /  YYMMDD','enddate'); r.ImGui_EndDisabled(ctx)
+      field('End date  /  YYMMDD','enddate')
       r.ImGui_TableNextColumn(ctx)
-      r.ImGui_BeginDisabled(ctx,form.open); field('End time  /  HH:MM','finish'); r.ImGui_EndDisabled(ctx)
+      field('End time  /  optional','finish')
       r.ImGui_EndTable(ctx)
     end
-    local changed,value=r.ImGui_Checkbox(ctx,'Open end',form.open)
-    if changed then form.open=value end
+    muted('Leave end time blank for manual stop.')
     local preview=Core.make(form)
     r.ImGui_Separator(ctx)
     if preview then
@@ -859,7 +893,12 @@ local function run(r)
       text((state.mode=='continuous' and 'Band export: ' or 'Folder: ')..Core.folder(preview))
       muted(ending and duration(ending-begin) or 'Manual stop')
     end
-    if r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) then commit_form(now) end
+    if pending_trim then
+      text('End "'..pending_trim.name..'" at '..os.date('%y%m%d %H:%M:%S',pending_trim.finish)..' and save this slot?')
+      if r.ImGui_Button(ctx,'Shorten and save') then commit_form(now,true) end
+      r.ImGui_SameLine(ctx)
+      if r.ImGui_Button(ctx,'Keep editing') then pending_trim=nil; error='' end
+    elseif r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) then commit_form(now) end
     r.ImGui_SameLine(ctx)
     if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
     if editor_open and error~='' then text(error) end
