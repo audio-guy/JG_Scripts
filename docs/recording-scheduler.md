@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.3
+# Recording Scheduler 2.6.4
 
 ## Purpose
 
@@ -145,10 +145,11 @@ file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.3).
+The window title shows the running version (for example, Recording Scheduler v2.6.4).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
+The transport header is hidden when no recording is active or scheduled.
 The UI is designed for an experienced operator. The compact header shows state and
 next/active slot; one message area displays concrete issues. There are no navigation
 tabs or Recording help panel. Technical checks remain enforced. There is no

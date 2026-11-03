@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.3
+-- @version 2.6.4
 -- @changelog
+--   Hide the transport header when no recording is active or scheduled.
 --   Allow MIDI input recording, verify new MIDI events, and save embedded MIDI with the project.
 --   Confirm the recording interruption before saving directly adjacent slots.
 --   Remove Shared WAV from scheduling; migrate plans to separate clock-aligned slots.
@@ -42,7 +43,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.3' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.4' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -1449,12 +1450,12 @@ local function run(r)
     local quit=false
     if visible then
       r.ImGui_PushFont(ctx,nil,16)
-      if r.ImGui_BeginTable(ctx,'Transport header',2,r.ImGui_TableFlags_SizingStretchProp()) then
+      local nextslot
+      for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
+      if (engine.active or nextslot) and r.ImGui_BeginTable(ctx,'Transport header',2,r.ImGui_TableFlags_SizingStretchProp()) then
         r.ImGui_TableSetupColumn(ctx,'State',r.ImGui_TableColumnFlags_WidthStretch())
         r.ImGui_TableSetupColumn(ctx,'Controls',r.ImGui_TableColumnFlags_WidthFixed(),240)
         r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
-        local nextslot
-        for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
         status(engine.active and (engine.gap_paused and 'Waiting between slots' or 'Recording') or (nextslot and not ready and 'Not ready' or (state.enabled and 'Scheduled' or (nextslot and 'Not ready' or 'Idle'))))
         r.ImGui_SameLine(ctx)
         if engine.active then
@@ -1464,7 +1465,7 @@ local function run(r)
         elseif nextslot then
           text('Next: '..nextslot.name)
           muted(stamp(nextslot.start)..'  /  in '..duration(Core.bounds(nextslot)-now))
-        else muted('No upcoming slots') end
+        end
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
           if r.ImGui_Button(ctx,'Stop recording',-1,0) then engine:stop(now) end

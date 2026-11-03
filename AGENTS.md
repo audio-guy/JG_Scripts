@@ -81,3 +81,5 @@
   takes. Preserve REAPER's MIDI storage preference and save the named project after
   MIDI capture, restoring the recording destination first. Report save failures.
 - Do not show a redundant Separate slots mode line in the main header.
+- Hide the empty transport header; no Idle / No upcoming slots line when no recording
+  is active or scheduled.
