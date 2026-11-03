@@ -123,15 +123,6 @@ test('adapter accepts MIDI input but rejects disconnected device and loops',func
   api.GetSetRepeatEx=function() return 1 end; assert(not h:preflight()); api.GetSetRepeatEx=function() return 0 end
   api.GetMediaTrackInfo_Value=function(_,k) return k=='I_RECARM' and 1 or (k=='I_RECINPUT' and 4096 or 0) end; assert(h:preflight())
 end)
-test('native folder picker selects, cancels and reports missing extension',function()
-  local h,api=rig(); local path,err=h:choose_folder(''); eq(path,nil); assert(err:find('js_ReaScriptAPI'))
-  api.JS_Dialog_BrowseForFolder=function(title,initial) eq(initial,root); return 1,root..'/Selected folder' end
-  eq(h:choose_folder(''),root..'/Selected folder')
-  api.JS_Dialog_BrowseForFolder=function() return 0,'' end
-  path,err=h:choose_folder(''); eq(path,nil); eq(err,nil)
-  api.JS_Dialog_BrowseForFolder=function() return -1,'' end
-  path,err=h:choose_folder(''); eq(path,nil); assert(err)
-end)
 test('write failure prevents start',function()
   local h,api,cfg,sources,commands=rig(); h.writable=function() return nil,'Disk unavailable' end; assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
 end)
@@ -244,10 +235,9 @@ test('single schedule view, settings, activity window and editor preserve data a
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
   for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth','SetKeyboardFocusHere'}) do api['ImGui_'..key]=noop end
   for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns','SelectableFlags_AllowDoubleClick'}) do api['ImGui_'..key]=function() return 0 end end
-  local settings_open=false
   api.ImGui_CollapsingHeader=function(_,label)
     assert(label~='Selected slot details' and label~='Recording help' and label~='Templates')
-    if label=='Recording settings' then if clicked==label then settings_open=not settings_open end; return settings_open end
+    assert(label~='Recording folder' and label~='Recording settings', 'The recording folder must not require expanding')
     return false
   end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
@@ -332,8 +322,8 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Add slot'); frame()
     frame('Save slot',{['##name']='Later capture',['##date']='301102',['##enddate']='301102',['##start']='23:00',['##finish']='23:30'})
     eq(captured.state.enabled,true)
-    frame('Recording settings'); assert(shown['Add slot'] and shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
-    frame('Recording settings'); frame('Activity log'); assert(shown['Export log'] and shown['Add slot'] and not shown['##recording_root'])
+    frame(); assert(shown['Add slot'] and not shown['##recording_root'] and not shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
+    frame('Activity log'); assert(shown['Export log'] and shown['Add slot'] and not shown['##recording_root'])
     local normal_begin=api.ImGui_Begin
     api.ImGui_Begin=function(_,title) windows=windows+1; return true,not title:find('###Recording Scheduler Activity',1,true) end
     frame(); api.ImGui_Begin=normal_begin
@@ -381,11 +371,9 @@ test('single schedule view, settings, activity window and editor preserve data a
     focused_input='##start'; frame('KeypadEnter')
     frame(); eq(captured.state.slots[#captured.state.slots].name,expected_default); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
     frame('Undo')
-    frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
     frame(); eq(captured.state.mode,'separate'); assert(not shown['##mode'] and not shown['Recording mode'])
     api.ImGui_Combo=api.ImGui_Checkbox
-    frame('Recording settings')
     captured.state.captures={{id='ui',wall=0,position=0,folder=root,bands={{region=1,start=0,name='Band'}},files={}}}
     api.EnumProjectMarkers3=function(_,i) if i>0 then return 0 end; return 1,true,0,10,'Band renamed',1,0 end
     frame('Export band folders...'); frame()
@@ -495,6 +483,14 @@ test('mixed audio and MIDI sessions require a valid result on both types of trac
   assert(h:verify())
   audio.items={}; assert(not h:verify())
   audio.items={audio_item}; midi.items={}; assert(not h:verify())
+end)
+test('slot folders always use the saved RPP directory instead of media path or old overrides',function()
+  local h,api,cfg=rig()
+  api.GetProjectPathEx=function() error('The recording-media path must not be used') end
+  eq(h:root_path('/old/custom/folder'),root)
+  assert(h:start(slot(),'old-relative-folder'))
+  eq(cfg.RECORD_PATH,root..'/'..C.folder(slot()))
+  h:stop(); h:restore(); eq(cfg.RECORD_PATH,'original')
 end)
 for path in pairs(files) do os.remove(path) end
 for path in pairs(dirs) do os.remove(path) end

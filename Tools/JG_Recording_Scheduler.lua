@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.5
+-- @version 2.6.7
 -- @changelog
+--   Record slot folders directly beside the saved project; remove destination settings.
 --   Focus the name field immediately when opening Add slot.
 --   Hide the transport header when no recording is active or scheduled.
 --   Allow MIDI input recording, verify new MIDI events, and save embedded MIDI with the project.
@@ -44,7 +45,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.5' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.7' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -557,10 +558,12 @@ function Host:preflight(enabling)
 end
 local function join(a,b) return a:gsub('[/\\]+$','')..'/'..b end
 local function absolute(s) return s:match('^[/\\]') or s:match('^%a:[/\\]') end
-function Host:root_path(root)
-  if root=='' then return self.r.GetProjectPathEx(self.project,'') end
-  if absolute(root) then return root end
-  return join(self:project_file():match('^(.*)[/\\]') or '',root)
+function Host:root_path()
+  -- Always use the RPP directory, not REAPER's separate media/recording path.
+  local file=self:project_file()
+  local directory=file:match('^(.*)[/\\]') or ''
+  if directory=='' and file:sub(1,1)=='/' then return '/' end
+  return directory
 end
 function Host:writable(path)
   self.r.RecursiveCreateDirectory(path,0)
@@ -580,16 +583,6 @@ function Host:prepare(state)
   end
   return true
 end
-function Host:choose_folder(root)
-  if not self.r.JS_Dialog_BrowseForFolder then
-    return nil,'Install js_ReaScriptAPI via ReaPack to use the folder picker, or enter a path manually.'
-  end
-  local result,path=self.r.JS_Dialog_BrowseForFolder('Choose recording folder',self:root_path(root))
-  if result==1 and path and path~='' then return path end
-  if result==0 then return nil end -- Cancel preserves the current destination.
-  return nil,'The folder dialog could not be opened. Enter the path manually.'
-end
-
 function Host:source_map()
   local files,lengths={},{}
   for _,track in ipairs(self.expected) do
@@ -1282,26 +1275,6 @@ local function run(r)
     if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
     if editor_open and error~='' then text(error) end
   end
-  local function draw_setup()
-    if state.timeline_origin then muted('Timeline reference day: '..os.date('%y%m%d',state.timeline_origin)) end
-    text('Recording destination')
-    r.ImGui_BeginDisabled(ctx,not setup_editable())
-    r.ImGui_SetNextItemWidth(ctx,-1)
-    local changed,value=r.ImGui_InputText(ctx,'##recording_root',state.root)
-    if changed then state.root=value; state.revision=state.revision+1 end
-    if r.ImGui_Button(ctx,'Choose folder...') then
-      local path,err=host:choose_folder(state.root)
-      if path then state.root=path; state.revision=state.revision+1; error='' elseif err then error=err end
-    end
-    r.ImGui_SameLine(ctx)
-    if r.ImGui_Button(ctx,'Use project folder') then state.root=''; state.revision=state.revision+1; error='' end
-    muted((state.root=='' and 'Project: ' or 'Resolved path: ')..host:root_path(state.root))
-    r.ImGui_Separator(ctx)
-    muted('Subfolders: YYMMDD - HHMM Name')
-    r.ImGui_EndDisabled(ctx)
-    if not setup_editable() then muted('Finish recording/export to change mode or destination.') end
-
-  end
   local function draw_schedule(now)
     if export_task then
       text('Exporting '..export_task.done..' / '..export_task.total..' files')
@@ -1490,7 +1463,6 @@ local function run(r)
         if r.ImGui_Button(ctx,'Keep running') then close_requested=false end
       end
       r.ImGui_Separator(ctx)
-      if r.ImGui_CollapsingHeader(ctx,'Recording settings') then draw_setup(); r.ImGui_Separator(ctx) end
       draw_schedule(now)
       r.ImGui_PopFont(ctx)
       r.ImGui_End(ctx)

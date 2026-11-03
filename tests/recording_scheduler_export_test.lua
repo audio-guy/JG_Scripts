@@ -87,7 +87,7 @@ end)
 test('selected bands omit unavailable regions without changing the recording plan',function()
   local api={GetPlayStateEx=function() return 0 end,GetProjectPathEx=function() return root end,genGuid=function() return '{export}' end,
     EnumProjectMarkers3=function(_,i) if i>0 then return 0 end; return 1,true,10,11,'Band',1,0 end}
-  local h=H.new(api,{}); local st=C.new(); st.captures={{id='c',wall=0,position=10,folder=root,bands={{region=1,start=0,name='Band'},{region=2,start=1,name='Missing'}},files=files}}
+  local h=H.new(api,{}); h.project_file=function() return root..'/session.rpp' end; local st=C.new(); st.captures={{id='c',wall=0,position=10,folder=root,bands={{region=1,start=0,name='Band'},{region=2,start=1,name='Missing'}},files=files}}
   local before=C.serialize(st); assert(not h:export_plan(st)); local plan=assert(h:export_plan(st,{['c:1']=true}))
   eq(plan.bands,1); eq(C.serialize(st),before)
 end)

@@ -30,13 +30,13 @@
 - Separate slots stop/start into their own folders; transitions can leave a gap.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
-- Keep the Scheduler main view focused on status and the schedule. Put configuration
-  in a collapsed Recording settings section, logs in an optional Activity log window,
+- Keep the Scheduler main view focused on status and the schedule. Keep logs in an optional Activity log window,
   and slot editing behind an explicit action. No navigation tabs or Recording help. Keep
   the editor free of templates; use Duplicate for similar slots and avoid per-row button clusters.
 - No occurrences/repetition, pre/post-roll controls or mandatory setup checklist.
   Use direct recording start/end times and duplicate slots when needed.
-- Offer a native folder picker for the recording destination.
+- Record each slot into a subfolder beside the saved RPP. Do not use the project
+  media path or legacy destination overrides. No recording settings or folder picker.
 - Always show the running Scheduler version in the window title. Keep it in sync
   with the script's ReaPack version; preserve the ImGui window ID across updates.
 

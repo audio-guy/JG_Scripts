@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.5
+# Recording Scheduler 2.6.7
 
 ## Purpose
 
@@ -7,7 +7,7 @@ Each slot starts/stops into its own folder at its clock-time position, including
 while recording. Adjacent slots can have a short stop/start gap. The running
 slot's name and end remain editable; its start stays fixed. There is no mode
 selector, repetition, pre/post-roll control, template or confirmation checklist.
-The destination can change while waiting, but not during recording or export.
+The recording destination is always the directory containing the saved RPP.
 
 Shared WAV was removed because REAPER appends to the existing live item when
 resuming. Correct live timeline placement takes priority over sharing one file.
@@ -16,12 +16,10 @@ Historical shared recordings and their band-export maps remain available.
 ## Installation and use
 
 Load `Tools/JG_Recording_Scheduler.lua` in REAPER's Actions list. Requires ReaImGui
-0.10 or newer. The optional js_ReaScriptAPI extension supplies the native folder
-picker; without it, the destination can still be entered manually.
+0.10 or newer. No folder-picker extension is required.
 
 1. Save the project and arm the intended audio or MIDI input tracks.
-2. In **Recording settings**, choose the recording destination with **Choose folder...**.
-   **Use project folder** uses the effective project recording path instead.
+2. The Scheduler uses the folder containing the saved project automatically.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
    For overnight recordings, enter the next end date. Leave the end time blank
    for manual stop; there is no Open end checkbox.
@@ -54,7 +52,7 @@ that already ran or attempted to record retain their history; use Duplicate inst
 
 A start at 00:52 is placed at timeline time 00:52:00, independent of the edit cursor
 or project length. The first recording establishes a midnight reference day, saved
-with the project and shown in Recording settings. Later days continue beyond 24 hours rather
+with the project. Later days continue beyond 24 hours rather
 than wrapping over existing recordings. Project start-time offsets are respected;
 a resulting position before the project start is rejected. Late starts are placed
 at their actual start time rather than backdated to the intended start.
@@ -70,12 +68,12 @@ after such a change, elapsed timeline time can differ from local clock time.
 
 ## Recording destination
 
-The selected folder is the parent. Each slot records into its own
-`YYMMDD - HHMM Name` subfolder. No audio is recorded in gaps between slots.
+The directory containing the saved `.RPP` is the parent. Each slot records into
+its own `YYMMDD - HHMM Name` subfolder directly beside the project file. No audio is recorded in gaps between slots.
 
 Folder names preserve user names, replacing only filesystem-invalid characters.
-The root may be absolute or relative to the saved project. Cancelling the folder
-picker preserves the previous path. Separate-slot directories may be reused;
+REAPER's separate recording/media path and old Scheduler destination overrides
+are not used for new recordings. Existing audio and historical capture paths are not moved. Separate-slot directories may be reused;
 REAPER supplies unique filenames. Existing shared-session directories remain unchanged.
 
 ## MIDI recording
@@ -145,7 +143,7 @@ file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.5).
+The window title shows the running version (for example, Recording Scheduler v2.6.7).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -167,7 +165,6 @@ admin/guest distinction.
 - **Slot editor:** optional name, dates and times. Add slot focuses the name field immediately. Blank names become Slot N using the slot number. Use Duplicate for similar slots. Save or Enter in any input field returns to the plan after validation; Cancel
   discards the draft. Tab and mouse focus changes retain edits immediately. Both Return
   and keypad Enter submit from an input field. Enter never confirms an overlap adjustment automatically. Existing slots keep running on schedule while you plan another.
-- **Recording settings:** collapsed destination configuration.
 - **Activity log:** opens a separate optional window with events and verified file
   paths, newest first. Closing it leaves scheduling active. Export log writes
   `<project>.rpp.recording-log.tsv` and replaces the previous export.
@@ -183,8 +180,7 @@ folders; saving does not interrupt the current recording.
 A running or planned predecessor can be shortened at the new start only after
 explicit confirmation. Conflicts with other slots are rejected before changing the
 plan or regions. Adding during capture clears the Undo snapshot.
-Deleting, duplicating and undoing plan changes remain locked during capture,
-as do destination changes. Completed recording history cannot be edited.
+Deleting, duplicating and undoing plan changes remain locked during capture. Completed recording history cannot be edited.
 If a recording ends while its editor is open, saving is rejected. Live edits clear
 the plan Undo snapshot to prevent restoring stale recording state.
 Stop recording ends the current slot. Future independent slots
@@ -273,7 +269,7 @@ luac -p Tools/JG_Recording_Scheduler.lua
 
 The tests use the real parser, state machine, storage, adapter and GUI loop with a
 mock REAPER host. They cover timing, migration, dedicated folders, ownership,
-file verification, cancelled edits and native picker selection/cancellation/errors.
+file verification, cancelled edits and project-directory destination placement.
 Generated PCM fixtures additionally verify sample-byte-accurate region cuts, split
 source files, format handling and cancellation. The native two-track/three-slot test and its limitations are documented in
 [the pause test report](recording-scheduler-pause-test.md). Tests with the intended
