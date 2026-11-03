@@ -70,3 +70,8 @@
 
 - Blank names default to Slot N using the slot number. Allow Add slot during recording. Each added slot retains its independent folder. Confirm any predecessor shortening
   and validate overlaps before changing the running plan or its regions.
+
+- Confirm directly adjacent slots when saving, including live end edits. Use
+  "will cause a brief interruption", never "may". Offer Save anyway / Keep editing;
+  Enter must not confirm. Show the same notice with overlap-shortening confirmation.
+  Never interrupt unattended recording with a transition-time dialog.

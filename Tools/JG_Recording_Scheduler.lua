@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.1
+-- @version 2.6.2
 -- @changelog
+--   Confirm the recording interruption before saving directly adjacent slots.
 --   Remove Shared WAV from scheduling; migrate plans to separate clock-aligned slots.
 --   Preserve historical capture maps and band export.
 --   Pause between slots in Shared WAV mode; resume the same source files without rendering.
@@ -40,7 +41,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.1' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.2' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -112,6 +113,17 @@ function Core.conflict(slots)
     local _,lastend=Core.bounds(pending[i-1]); local start=Core.bounds(pending[i])
     if not lastend or start<lastend then return pending[i-1],pending[i] end
   end
+end
+function Core.adjacent(state,draft,replace_id)
+  local check={draft}; local adjacent=false
+  for _,slot in ipairs(state.slots) do
+    if slot.id~=replace_id and (slot.status=='Scheduled' or slot.status=='Recording') then
+      local candidate=copy(slot); candidate.status='Scheduled'; check[#check+1]=candidate
+      if slot.finish==draft.start or (draft.finish and draft.finish==slot.start) then adjacent=true end
+    end
+  end
+  -- Resolve overlaps first; shortening a predecessor has its own confirmation.
+  return adjacent and not Core.conflict(check)
 end
 function Core.new()
   return {slots={},log={},templates={},next_id=1,enabled=false,mode='separate',root='',revision=0,captures={}}
@@ -1050,6 +1062,8 @@ local function run(r)
   local export_preview,export_task=nil,nil
   local live_edit=false
   local pending_trim=nil
+  local pending_adjacent=nil
+  local adjacency_warning="These slots meet without a gap. Starting a new recording file will cause a brief interruption."
   local undo=nil
   local function save()
     if not host:valid() then return end
@@ -1070,7 +1084,7 @@ local function run(r)
     sidecar=file~='' and file..'.jg-scheduler' or nil
   end
   local function snapshot() undo=Core.serialize(state) end
-  local function clear_form() live_edit=false; pending_trim=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
+  local function clear_form() live_edit=false; pending_trim=nil; pending_adjacent=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not engine.active and not export_task end
   local function can_add() return not export_task end
   local function can_edit_slot(slot)
@@ -1119,7 +1133,7 @@ local function run(r)
       submit_on_enter=true
     end
     if changed and value~=form[key] then
-      pending_trim=nil
+      pending_trim=nil; pending_adjacent=nil
       -- Keep same-day dates in sync until the user deliberately chooses another end date.
       if key=='date' and form.enddate==form.date then form.enddate=value end
       form[key]=value
@@ -1127,18 +1141,24 @@ local function run(r)
   end
   local function field(label,key) text(label); input(key) end
   local function start_editor(s,duplicate)
-    error=''
+    error=''; pending_adjacent=nil; pending_trim=nil
     if s then edit(s,duplicate) else clear_form(); form.date=os.date('%y%m%d'); form.enddate=form.date end
     live_edit=s and not duplicate and engine:live_slot(s.id)~=nil or false
     editor_open=true
   end
-  local function commit_form(now,confirm_trim)
+  local function commit_form(now,confirm_trim,confirm_adjacent)
     if host:project_file()=='' then
       error='Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'
       return
     end
     local s,err=Core.make(form,'Slot '..(editing or state.next_id))
     if s then
+      if confirm_adjacent and (not pending_adjacent or pending_adjacent~=state.revision) then
+        pending_adjacent=nil; error='The schedule changed. Save again to review adjacent slots.'; return
+      end
+      if not confirm_trim and not confirm_adjacent and (live_edit or s.start>now) and Core.adjacent(state,s,editing) then
+        pending_adjacent=state.revision; error=''; return
+      end
       if live_edit then
         local ok; ok,err=engine:edit_live(editing,s,now)
         if ok then clear_form(); editor_open=false; undo=nil; save() end
@@ -1191,7 +1211,13 @@ local function run(r)
       text('Folder: '..Core.folder(preview))
       muted(ending and duration(ending-begin) or 'Manual stop')
     end
-    if pending_trim then
+    if pending_adjacent then
+      text(adjacency_warning)
+      if r.ImGui_Button(ctx,'Save anyway') then commit_form(now,false,true) end
+      r.ImGui_SameLine(ctx)
+      if r.ImGui_Button(ctx,'Keep editing') then pending_adjacent=nil; error='' end
+    elseif pending_trim then
+      text(adjacency_warning)
       text('End "'..pending_trim.name..'" at '..os.date('%y%m%d %H:%M:%S',pending_trim.finish)..' and save this slot?')
       if r.ImGui_Button(ctx,'Shorten and save') then commit_form(now,true) end
       r.ImGui_SameLine(ctx)

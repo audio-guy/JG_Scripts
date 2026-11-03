@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.1
+# Recording Scheduler 2.6.2
 
 ## Purpose
 
@@ -37,6 +37,12 @@ that slot at the new start. **Shorten and save** applies both changes together;
 **Keep editing** leaves the plan unchanged. Undo restores both changes. Equal
 starts, additional conflicts and already recorded slots require manual correction.
 If the schedule changes while confirmation is open, it must be reviewed again.
+Saving a slot directly adjacent to another planned or running slot requires
+**Save anyway** or **Keep editing**. The notice reads: "These slots meet without a
+gap. Starting a new recording file will cause a brief interruption." Enter does
+not confirm it. Editing a field or changing the plan invalidates confirmation.
+The same notice accompanies **Shorten and save** when resolving an overlap.
+No confirmation dialog appears at recording time.
 Saving a slot requires a saved REAPER project. A rejected draft stays
 open so it can be saved after saving the project. Readiness issues are shown before
 the first start; the start-time safety check still runs.
@@ -124,7 +130,7 @@ file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.1).
+The window title shows the running version (for example, Recording Scheduler v2.6.2).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
