@@ -48,7 +48,8 @@
 
 - Saving a valid future slot schedules it automatically. No separate Enable step.
   Allow adding/editing slots while waiting; protect active recording and destination
-  changes. Preserve an explicit Pause across reopening. Show save validation next
+  changes. Always watch the plan while open; no Pause/Resume controls or saved pause
+  state. Keep safety holds for clock/storage errors. Show save validation next
   to the form action and retain rejected drafts.
 
 - Place scheduled recordings by clock time relative to a persisted midnight reference
@@ -60,3 +61,6 @@
   slot's start only with explicit confirmation; apply both changes atomically.
 - Ordinary playback must not block scheduled recording: stop it before positioning
   and starting. Never stop or take over an existing recording.
+
+- Double-click editable schedule rows to open their editor. Date/time field pairs
+  share label and input table rows so their baselines remain aligned.

@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.3
+# Recording Scheduler 2.5.4
 
 ## Purpose
 
@@ -12,8 +12,8 @@ pre/post-roll controls, templates or confirmation checklist.
 - **Separate slots:** each slot starts/stops into its own folder. Existing version 2
   plans retain this mode. Adjacent slots can have an audio gap.
 
-Mode is never inferred from adjacency. Choose it in Recording settings before scheduling, or
-pause the schedule to change it. Mode/destination cannot change during recording.
+Mode is never inferred from adjacency. Choose it in Recording settings. Mode and
+destination can change while waiting, but not during recording or export.
 
 ## Installation and use
 
@@ -28,7 +28,8 @@ picker; without it, the destination can still be entered manually.
    For overnight recordings, enter the next end date. Leave the end time blank
    for manual stop; there is no Open end checkbox.
 4. Saving schedules the slot automatically. Use Duplicate to add another similar slot.
-   **Pause schedule** suspends future starts; **Resume schedule** restores them.
+   The schedule is always watched while the Scheduler is open. There is no Pause
+   or Resume step.
 
 Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
 for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
@@ -84,7 +85,7 @@ length: adjust the last region afterward if needed.
 
 1. Finish the recording and adjust the band regions in REAPER. Keep their region
    IDs: move/resize/rename them, rather than deleting/recreating or renumbering them.
-2. In Schedule, click **Export band folders...**. Pause future scheduling first.
+2. In Schedule, click **Export band folders...**. Select the bands to export.
 3. Select the bands to export. Missing or unrecorded regions can be deselected.
 4. Click **Export now**. Current region boundaries/names are read again at confirmation.
 
@@ -112,13 +113,14 @@ must remain accessible at their original locations. Band capture records remain
 available after deleting schedule rows; deleting rows never deletes audio/regions.
 
 Export runs in small deferred chunks, may be cancelled and is unavailable during
-recording or active scheduling. Close the Scheduler to cancel an active export.
+recording. Upcoming slots continue to be watched; a recording start cancels any
+unfinished export. Close the Scheduler to cancel an active export.
 The application does not change global REAPER file-splitting preferences: continuous
 capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.3).
+The window title shows the running version (for example, Recording Scheduler v2.5.4).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -129,7 +131,8 @@ admin/guest distinction.
 
 
 - **Schedule:** next recording/countdown, transport controls and scrollable plan.
-  Select a row for Edit, Duplicate or Delete. Completed/stopped entries are hidden
+  Select a row for Edit, Duplicate or Delete. Double-click an editable slot to open
+  its editor; recorded history stays protected. Completed/stopped entries are hidden
   initially; failures remain visible. Show history reveals past entries.
   Delete removes any inactive slot from the plan, including failed and completed
   slots. It never deletes audio files. Undo restores the removed entry.
@@ -140,11 +143,11 @@ admin/guest distinction.
   `<project>.rpp.recording-log.tsv` and replaces the previous export.
 
 Plan changes are allowed while waiting for scheduled starts, but locked during an
-active recording. Pause scheduling before changing the destination folder. The active end can be extended by five minutes. In Separate slots mode this must
+active recording or export. The active end can be extended by five minutes. In Separate slots mode this must
 not conflict with a later slot. Continuous mode extends the entire capture. Undo restores the last plan change.
-Pause schedule leaves an active recording's scheduled stop intact. In Continuous
-mode that means the last slot's end, including all remaining bands and pauses. Stop recording
-stops the owned recording and disables future starts. Closing during an active recording asks whether to stop and close or keep running.
+In Continuous mode the scheduled stop is the last slot’s end, including all bands
+and gaps. Stop recording ends the current capture. Future independent slots
+remain scheduled. Closing during an active recording asks whether to stop and close or keep running.
 Otherwise closing directly disables future starts and retains the plan.
 
 ## Readiness and limitations
@@ -162,7 +165,8 @@ record mode, no recording-length limit/count-in, automatic retention of recorded
 files, correct routing/levels, sufficient disk space and a computer that stays awake.
 These conditions are not all measured by the script. Writing a small probe file does not reserve disk space.
 
-The scheduler is bound to its original project. Changing project tabs disables
+The scheduler is bound to its original project. Returning to the target project
+resumes watching upcoming slots automatically. Changing project tabs disables
 future starts; an owned recording keeps its scheduled stop in the original project.
 Window visibility and selected GUI view do not affect scheduling.
 
@@ -177,8 +181,8 @@ sidecar, `<project>.rpp.jg-scheduler`. Save the project normally to embed the ex
 keep the sidecar with the project. Failed recovery-file writes disable future starts.
 Corrupt data is preserved for recovery instead of overwritten.
 
-Reopening automatically watches future slots unless you explicitly paused the plan.
-An explicit pause and the selected mode are retained across reopening. Version 2
+Reopening automatically watches future slots. Obsolete saved pause flags are
+ignored; the selected recording mode is retained. Version 2
 plans are migrated to Separate slots; version 3 persists the explicit mode. Past starts become Missed; previously
 active slots become Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
 with pre/post-roll are converted to visible direct start/end times, preserving the
@@ -191,7 +195,7 @@ is preserved for compatibility, but templates are no longer available in the UI.
 
 | Status | Meaning |
 |---|---|
-| Scheduled | Starts automatically at the planned time unless paused |
+| Scheduled | Starts automatically at the planned time while the Scheduler is open |
 | Recording | The slot is recording |
 | Completed | New nonempty files with positive source duration found on every expected track |
 | Partial | Files found, but timing was late or the system clock changed |
@@ -228,3 +232,6 @@ or overlaps retain the draft and leave the existing plan unchanged. Saving slots
 requires a saved project, but does not require an already prepared audio device.
 Recording still requires valid armed audio inputs. A future slot fails visibly if these conditions
 are not met at its start.
+
+A system-clock jump retains a safety hold: check the clock and reopen the Scheduler.
+Removing manual Pause/Resume does not bypass recording or storage safety checks.

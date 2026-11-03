@@ -209,7 +209,7 @@ test('single schedule view, settings, activity window and editor preserve data a
   api.ImGui_BeginTable=function() tables=tables+1; return true end; api.ImGui_EndTable=function() tables=tables-1 end
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
   for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
-  for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns'}) do api['ImGui_'..key]=function() return 0 end end
+  for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns','SelectableFlags_AllowDoubleClick'}) do api['ImGui_'..key]=function() return 0 end end
   local settings_open=false
   api.ImGui_CollapsingHeader=function(_,label)
     assert(label~='Selected slot details' and label~='Recording help' and label~='Templates')
@@ -222,6 +222,8 @@ test('single schedule view, settings, activity window and editor preserve data a
   api.ImGui_Combo=api.ImGui_Checkbox
   api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
   api.ImGui_Selectable=function(_,label) assert(label~='Schedule' and label~='Setup' and label~='Activity'); return tab==label end
+  local double_click=false
+  api.ImGui_IsMouseDoubleClicked=function(_,button) eq(button,0); return double_click end
   api.ImGui_GetContentRegionAvail=function() return 900,500 end
   api.GetProjectName=function() return 'session.rpp' end
   api.atexit=function(fn) exits[#exits+1]=fn end; api.defer=function(fn) queued=fn end; api.time_precise=function() return 0 end
@@ -255,24 +257,26 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Undo'); eq(#captured.state.slots,2)
 
     frame('Cancel')
-    frame('Pause schedule'); eq(captured.state.enabled,false)
+    frame(); assert(not shown['Pause schedule'] and not shown['Resume schedule']); eq(captured.state.enabled,true)
     frame('Add slot'); frame()
     frame('Save slot',{['##name']='Later capture',['##date']='301102',['##enddate']='301102',['##start']='23:00',['##finish']='23:30'})
-    eq(captured.state.enabled,false)
-    frame('Resume schedule'); eq(captured.state.enabled,true)
+    eq(captured.state.enabled,true)
     frame('Recording settings'); assert(shown['Add slot'] and shown['##recording_root'] and shown['Choose folder...'] and not shown['##name'] and not shown['##recording_mode'])
     frame('Recording settings'); frame('Activity log'); assert(shown['Export log'] and shown['Add slot'] and not shown['##recording_root'])
     local normal_begin=api.ImGui_Begin
     api.ImGui_Begin=function(_,title) windows=windows+1; return true,not title:find('###Recording Scheduler Activity',1,true) end
     frame(); api.ImGui_Begin=normal_begin
     frame(); assert(shown['Add slot'] and not shown['Export log'] and not shown['##name'])
-    frame(nil,nil,'Future capture##slot'); frame('Edit selected'); frame()
+    frame(nil,nil,'Future capture##slot'); frame(); assert(not shown['##name'])
+    double_click=true; frame(nil,nil,'Future capture##slot'); double_click=false; frame()
     assert(shown['Save changes'])
     frame('Cancel',{['##name']='Discarded edit'}); frame()
     f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(saved.slots[2].name,'Future capture')
     -- A failed slot may be removed from the plan without touching recorded audio.
     captured.state.slots[2].status='Failed'
+    double_click=true; frame(nil,nil,'Future capture##slot'); double_click=false; frame()
+    assert(not shown['##name'], 'Double-click must not edit recording history')
     local audio=root..'/keep-recording.wav'; write(audio,'keep this recording')
     frame(nil,nil,'Future capture##slot'); frame('Delete')
     eq(#captured.state.slots,2)
@@ -280,8 +284,6 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Undo'); eq(#captured.state.slots,3)
     local project_file=h.project_file
     h.project_file=function() return '' end
-    frame('Pause schedule')
-    frame('Resume schedule'); eq(captured.state.enabled,false)
     frame('Add slot'); frame()
     frame('Save slot',{['##name']='Unsaved capture',['##date']='301103',['##enddate']='301103',['##start']='21:00',['##finish']='22:00'})
     eq(#captured.state.slots,3)
@@ -289,11 +291,11 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame(); assert(shown['##name'], 'Rejected draft must stay open')
     h.project_file=project_file
     frame('Save slot'); eq(#captured.state.slots,4)
-    frame('Resume schedule'); eq(captured.state.enabled,true)
+    frame(); eq(captured.state.enabled,true)
     frame('Add slot'); frame('Save slot',{['##name']='Open end test',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
     frame(); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
     frame('Undo')
-    frame('Pause schedule'); frame('Recording settings')
+    frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
     frame(); eq(captured.state.mode,'continuous')
     api.ImGui_Combo=api.ImGui_Checkbox
