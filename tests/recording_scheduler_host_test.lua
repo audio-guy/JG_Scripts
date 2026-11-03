@@ -168,6 +168,20 @@ test('continuous host creates linked regions and captures original source positi
   eq(c.files[1].position,70200); eq(c.files[1].length,8); eq(c.files[1].offset,0)
   eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
 end)
+test('manual stop closes only open-ended band regions and preserves edited names',function()
+  local h,api=rig(); local updated={}
+  api.EnumProjectMarkers3=function(_,i)
+    if i==0 then return 1,true,100,101,'Edited band name',7,123 end
+    if i==1 then return 1,true,200,220,'Fixed band',8,456 end
+    return 0
+  end
+  api.SetProjectMarker3=function(_,id,isregion,pos,finish,name,color)
+    updated[#updated+1]={id=id,finish=finish,name=name,color=color}; return true
+  end
+  h:finish_regions({position=100,wall=1000,bands={{region=7,open=true},{region=8,open=false}}},1042)
+  eq(#updated,1); eq(updated[1].id,7); eq(updated[1].finish,142)
+  eq(updated[1].name,'Edited band name'); eq(updated[1].color,123)
+end)
 test('full collapsed UI executes actual scheduled start and stop',function()
   local h,api,cfg,sources,commands=rig(); local p=api.EnumProjects(-1); local st=C.new(); st.mode='separate'; assert(C.apply(st,{slot('Loop test')}))
   local now=st.slots[1].start-10; local queue,exits,ext={},{},{}
@@ -317,6 +331,8 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Save changes',{['##name']='Live edited',['##start']='23:59',['##finish']='22:10'})
     frame(); eq(live.start,original_start); eq(live.name,'Live edited')
     assert(shown['Add slot'] and not shown['##name']); eq(h:recording(),true)
+    local has_countdown=false; for label in pairs(shown) do if label:match('^%d+:%d%d:%d%d left$') then has_countdown=true end end
+    assert(has_countdown, 'Running slot must show remaining time in its row')
     captured:stop(os.time()+1)
     frame('Add slot'); frame('Save slot',{['##name']='Open end test',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
     frame(); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])

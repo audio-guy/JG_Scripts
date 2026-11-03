@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.6
+# Recording Scheduler 2.5.7
 
 ## Purpose
 
@@ -81,7 +81,10 @@ REAPER supplies unique filenames. Continuous sessions use unique directories.
 Continuous recording creates named regions from the planned times. These are
 editing boundaries, not transport commands. They remain editable after recording;
 changing a region does not reschedule a recording. An open-ended final region is
-closed when recording stops. Editing a running slot updates its linked region
+closed when recording stops, including a manual REAPER transport stop while the
+Scheduler stays running. During capture it is a short placeholder, not a growing
+region. Its final end follows the detected wall-clock stop (second resolution).
+Editing a running slot updates its linked region
 name/end. Changing the final slot’s end also changes the continuous capture stop.
 
 1. Finish the recording and adjust the band regions in REAPER. Keep their region
@@ -121,7 +124,7 @@ capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.6).
+The window title shows the running version (for example, Recording Scheduler v2.5.7).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -132,6 +135,8 @@ admin/guest distinction.
 
 
 - **Schedule:** next recording/countdown, transport controls and scrollable plan.
+  Length / left shows planned duration while waiting and a seconds countdown while
+  recording. Open-ended recordings show Manual stop.
   Select a row for Edit, Duplicate or Delete. Double-click an editable slot to open
   its editor; recorded history stays protected. Completed/stopped entries are hidden
   initially; failures remain visible. Show history reveals past entries.

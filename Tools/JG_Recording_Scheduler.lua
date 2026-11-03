@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.6
+-- @version 2.5.7
 -- @changelog
+--   Show a remaining-time countdown in the slot list during recording.
 --   Save slot forms with Enter from any input field, preserving overlap confirmation.
 --   Edit the running slot name/end directly and update its band region and stop time.
 --   Remove Extend by 5 min.
@@ -33,7 +34,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.6' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.7' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -1047,7 +1048,7 @@ local function run(r)
     local flags=r.ImGui_TableFlags_RowBg()|r.ImGui_TableFlags_Resizable()|r.ImGui_TableFlags_ScrollY()
     if r.ImGui_BeginTable(ctx,'Schedule v2.1',6,flags,0,tableheight) then
       r.ImGui_TableSetupColumn(ctx,'Name',r.ImGui_TableColumnFlags_WidthStretch())
-      for _,column in ipairs({{'Date',78},{'Start',64},{'End',64},{'Length',84},{'Status',110}}) do
+      for _,column in ipairs({{'Date',78},{'Start',64},{'End',64},{'Length / left',124},{'Status',110}}) do
         r.ImGui_TableSetupColumn(ctx,column[1],r.ImGui_TableColumnFlags_WidthFixed(),column[2])
       end
       r.ImGui_TableSetupScrollFreeze(ctx,0,1); r.ImGui_TableHeadersRow(ctx)
@@ -1066,7 +1067,11 @@ local function run(r)
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%y%m%d',s.start))
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,clocktime(s.start))
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and clocktime(s.finish) or 'Open')
-          r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,s.finish and duration(s.finish-s.start) or '--')
+          r.ImGui_TableNextColumn(ctx)
+          if s.status=='Recording' then
+            local _,ending=Core.bounds(s)
+            r.ImGui_Text(ctx,ending and (duration(ending-now)..' left') or 'Manual stop')
+          else r.ImGui_Text(ctx,s.finish and duration(s.finish-s.start) or '--') end
           r.ImGui_TableNextColumn(ctx); status(s.status)
           r.ImGui_PopID(ctx)
         end
