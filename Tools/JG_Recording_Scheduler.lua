@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.0
+-- @version 2.6.1
 -- @changelog
+--   Remove Shared WAV from scheduling; migrate plans to separate clock-aligned slots.
+--   Preserve historical capture maps and band export.
 --   Pause between slots in Shared WAV mode; resume the same source files without rendering.
 --   Place recorded sections at clock times after stopping, preserving original WAV data.
 --   Preserve field edits when tabbing; detect Enter separately from text updates.
@@ -34,11 +36,11 @@
 --   For unattended audio recordings and attended live capture. Requires ReaImGui 0.10+.
 --   Save the project first. Prepare audio inputs, normal record mode, no record length
 --   limit, and automatic retention of recorded files. Keep REAPER running and prevent sleep.
---   Shared WAV pauses between slots; Separate slots stop/start into individual folders.
+--   Each slot records into its own folder at its clock-time position.
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.0' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.1' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -112,7 +114,7 @@ function Core.conflict(slots)
   end
 end
 function Core.new()
-  return {slots={},log={},templates={},next_id=1,enabled=false,mode='continuous',root='',revision=0,captures={}}
+  return {slots={},log={},templates={},next_id=1,enabled=false,mode='separate',root='',revision=0,captures={}}
 end
 function Core.add_log(state,now,message)
   state.log[#state.log+1]={time=now,message=message}; state.revision=state.revision+1
@@ -183,7 +185,8 @@ function Core.deserialize(text)
       version=tonumber(f[2]); first=false
     elseif f[1]=='P' then
       if f[2]~='separate' and f[2]~='continuous' then return nil,'Invalid recording mode in saved plan.' end
-      st.mode,st.root,st.next_id,st.revision=version>=3 and f[2] or 'separate',f[3],tonumber(f[4]),tonumber(f[5])
+      -- Shared capture maps remain readable, but all future slots record separately.
+      st.mode,st.root,st.next_id,st.revision='separate',f[3],tonumber(f[4]),tonumber(f[5])
       -- Ignore the obsolete pause flag from earlier versions.
       st.timeline_origin=tonumber(f[7])
       if f[7] and f[7]~='' and not finite(st.timeline_origin) then return nil,'Invalid timeline reference day.' end
@@ -545,7 +548,6 @@ function Host:writable(path)
   return true
 end
 function Host:prepare(state)
-  if state.mode=='continuous' then return self:writable(self:root_path(state.root)) end
   -- Exercise every destination before arming; repeat the check at the actual start.
   for _,s in ipairs(state.slots) do
     if s.status=='Scheduled' then
@@ -1086,7 +1088,7 @@ local function run(r)
     local file=host:project_file(); if file=='' then error='Save the project first.'; return end
     local path=file..'.recording-log.tsv'; local f,err=io.open(path,'wb')
     if not f then error='Cannot export activity log: '..tostring(err); return end
-    local out={row('Recording Scheduler activity log'),row('Project',file),row('Recording mode',state.mode=='continuous' and 'Shared WAV' or 'Separate slots'),row('Slot','Planned start','Planned end','Actual start','Actual end','Status','Folder','Details')}
+    local out={row('Recording Scheduler activity log'),row('Project',file),row('Recording mode','Separate slots'),row('Slot','Planned start','Planned end','Actual start','Actual end','Status','Folder','Details')}
     for _,s in ipairs(state.slots) do out[#out+1]=row(s.name,stamp(s.start),stamp(s.finish),stamp(s.actual_start),stamp(s.actual_end),s.status,s.folder,s.note) end
     out[#out+1]=row('Time','Event')
     for _,e in ipairs(state.log) do out[#out+1]=row(os.date('%y%m%d - %H%M%S',e.time),e.message) end
@@ -1186,7 +1188,7 @@ local function run(r)
     r.ImGui_Separator(ctx)
     if preview then
       local begin,ending=Core.bounds(preview)
-      text((state.mode=='continuous' and 'Band export: ' or 'Folder: ')..Core.folder(preview))
+      text('Folder: '..Core.folder(preview))
       muted(ending and duration(ending-begin) or 'Manual stop')
     end
     if pending_trim then
@@ -1201,14 +1203,6 @@ local function run(r)
   end
   local function draw_setup()
     if state.timeline_origin then muted('Timeline reference day: '..os.date('%y%m%d',state.timeline_origin)) end
-    text('Recording mode')
-    r.ImGui_BeginDisabled(ctx,not setup_editable())
-    local mode_changed,mode=r.ImGui_Combo(ctx,'##mode',state.mode=='continuous' and 0 or 1,'Shared WAV\0Separate slots\0')
-    if mode_changed then state.mode=mode==0 and 'continuous' or 'separate'; state.revision=state.revision+1 end
-    r.ImGui_EndDisabled(ctx)
-    text(state.mode=='continuous' and 'Records slots into shared WAV files. Pauses between slots; no rendering. Items return to clock positions when stopped.' or 'Starts and stops each slot in its own folder. Adjacent slots can have an audio gap.')
-    if state.mode=='continuous' then muted('Band export requires PCM/float WAV or RF64 recordings.') end
-    r.ImGui_Separator(ctx)
     text('Recording destination')
     r.ImGui_BeginDisabled(ctx,not setup_editable())
     r.ImGui_SetNextItemWidth(ctx,-1)
@@ -1394,11 +1388,6 @@ local function run(r)
         elseif nextslot then
           text('Next: '..nextslot.name)
           muted(stamp(nextslot.start)..'  /  in '..duration(Core.bounds(nextslot)-now))
-          if state.mode=='continuous' then
-            local last=nextslot
-            for _,v in ipairs(state.slots) do if v.status=='Scheduled' and v.start>last.start then last=v end end
-            muted(last.finish and ('Through '..stamp(last.finish)..' / pauses skipped') or 'Through manual stop / pauses skipped')
-          end
         else muted('No upcoming slots') end
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
@@ -1406,7 +1395,7 @@ local function run(r)
         end
         r.ImGui_EndTable(ctx)
       end
-      muted(state.mode=='continuous' and 'Shared WAV / pauses skipped' or 'Separate slots / individual folders')
+      muted('Separate slots / individual folders')
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       -- One persistent message area, including the editor.

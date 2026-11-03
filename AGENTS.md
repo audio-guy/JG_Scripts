@@ -23,13 +23,10 @@
 - Generated slot folder, marker and recording-tag names use `YYMMDD - HHMM Name`.
   Use the slot start; preserve user names in data.
 - Keep scheduling independent of window visibility and bound to the original project.
-- Recording mode is explicit per project and visible in the main view. New projects
-  default to Shared WAV (stored mode key: continuous); existing v2 plans retain Separate slots.
-- Shared WAV pauses transport between slots and resumes the same source files.
-  Do not render, concatenate or rewrite original audio. Capture processing-cursor
-  boundaries and place recorded sections at their clock times after stopping.
-  Bands are editable REAPER regions; fit generated edges to available audio, preserve
-  manually edited edges, and export from current bounds/names. Never infer mode from adjacency.
+- Separate slots is the only available recording mode. Migrate saved Continuous /
+  Shared WAV plans to separate slots; no recording-mode selector. Clock-aligned
+  live items take priority over sharing one source file. Preserve historical capture
+  maps, original audio and region-based export for earlier shared recordings.
 - Separate slots stop/start into their own folders; transitions can leave a gap.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
@@ -71,7 +68,5 @@
   Update its linked region and effective stop together; reject past ends/overlaps.
   No Extend by 5 min control. Keep historical slots and active transport protected.
 
-- Blank names default to Slot N using the slot number. Allow Add slot during recording
-  in both modes. Separate slots retain independent folders; Shared WAV additions
-  extend the current capture after its last band. Confirm any predecessor shortening
+- Blank names default to Slot N using the slot number. Allow Add slot during recording. Each added slot retains its independent folder. Confirm any predecessor shortening
   and validate overlaps before changing the running plan or its regions.

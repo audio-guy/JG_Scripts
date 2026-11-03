@@ -135,8 +135,8 @@ end)
 test('write failure prevents start',function()
   local h,api,cfg,sources,commands=rig(); h.writable=function() return nil,'Disk unavailable' end; assert(not h:start(slot(),'')); eq(#commands,0); eq(cfg.RECORD_PATH,'original')
 end)
-test('continuous host creates linked regions and captures original source positions',function()
-  local h,api,cfg,sources,commands=rig(); local st=C.new()
+test('legacy continuous host creates linked regions and captures original source positions',function()
+  local h,api,cfg,sources,commands=rig(); local st=C.new(); st.mode='continuous'
   local a=slot('Band A'); a.finish=a.start+2
   local b=slot('Band B'); b.start=a.start+4; b.finish=a.start+6
   assert(C.apply(st,{a,b})); local regions={}
@@ -366,7 +366,7 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame('Undo')
     frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end
-    frame(); eq(captured.state.mode,'continuous')
+    frame(); eq(captured.state.mode,'separate'); assert(not shown['##mode'] and not shown['Recording mode'])
     api.ImGui_Combo=api.ImGui_Checkbox
     frame('Recording settings')
     captured.state.captures={{id='ui',wall=0,position=0,folder=root,bands={{region=1,start=0,name='Band'}},files={}}}
