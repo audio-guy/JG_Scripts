@@ -375,9 +375,9 @@ test('single schedule view, settings, activity window and editor preserve data a
     frame(); eq(captured.state.mode,'separate'); assert(not shown['##mode'] and not shown['Recording mode'])
     api.ImGui_Combo=api.ImGui_Checkbox
     captured.state.captures={{id='ui',wall=0,position=0,folder=root,bands={{region=1,start=0,name='Band'}},files={}}}
-    api.EnumProjectMarkers3=function(_,i) if i>0 then return 0 end; return 1,true,0,10,'Band renamed',1,0 end
-    frame('Export band folders...'); frame()
-    assert(shown['Export now']); frame('Cancel')
+    frame()
+    assert(shown['Add slot'] and not shown['Export band folders...'] and not shown['Export now'])
+    eq(#captured.state.captures,1)
     captured.state.enabled=true
     api.ImGui_Begin=function() windows=windows+1; return true,false end
     frame()

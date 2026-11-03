@@ -54,9 +54,6 @@ local function loop()
    log('item '..i..' position='..r.GetMediaItemInfo_Value(item,'D_POSITION')..' length='..r.GetMediaItemInfo_Value(item,'D_LENGTH')..' offset='..r.GetMediaItemTakeInfo_Value(take,'D_STARTOFFS'))
   end
   log('original WAV bytes unchanged='..tostring(unchanged))
-  local plan,err=h:export_plan(st,nil,root..'/integration-export-'..first)
-  assert(plan,err); assert(#plan.jobs==6)
-  for _,job in ipairs(plan.jobs) do log('export samples='..job.samples..' rate='..job.rate) end
   log('DONE'); f:close(); return
  end
  r.defer(loop)

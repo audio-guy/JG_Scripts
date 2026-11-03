@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.8
+# Recording Scheduler 2.6.9
 
 ## Purpose
 
@@ -11,7 +11,8 @@ The recording destination is always the directory containing the saved RPP.
 
 Shared WAV was removed because REAPER appends to the existing live item when
 resuming. Correct live timeline placement takes priority over sharing one file.
-Historical shared recordings and their band-export maps remain available.
+Historical shared recordings and their metadata remain unchanged. Band-folder
+export has been removed; new recordings already use their final slot folders.
 
 ## Installation and use
 
@@ -89,61 +90,11 @@ not as a WAV or necessarily as a file in the slot folder. After a MIDI recording
 the Scheduler saves the already named project, including its other current edits,
 after restoring the original recording destination. A save that cannot be confirmed
 marks the slot Failed with a request to save the project. Audio-only recording does
-not trigger this additional project save. Historical band WAV export is audio-only.
-
-## Historical band regions and export
-
-Earlier Continuous / Shared WAV versions created named regions from the planned times.
-The following export workflow remains available for those recordings. These are
-editing boundaries, not transport commands. They remain editable after recording;
-changing a region does not reschedule a recording. An open-ended final region is
-closed when recording stops, including a manual REAPER transport stop while the
-Scheduler stays running. During capture it is a short placeholder, not a growing
-region. Its final end is limited to the actual captured audio. Generated finite ends are
-also fitted to the available samples; manually adjusted edges are preserved.
-Editing a running slot updates its linked region
-name/end. Changing the final slot’s end also changes the shared capture stop.
-
-1. Finish the recording and adjust the band regions in REAPER. Keep their region
-   IDs: move/resize/rename them, rather than deleting/recreating or renumbering them.
-2. In Schedule, click **Export band folders...**. Select the bands to export.
-3. Select the bands to export. Missing or unrecorded regions can be deselected.
-4. Click **Export now**. Current region boundaries/names are read again at confirmation.
-
-Each export creates a unique `Band exports YYMMDD - HHMMSS <ID>` directory under
-the destination, with `YYMMDD - HHMM Name` band subfolders and one WAV per captured
-track. The folder timestamp follows the adjusted region start mapped to the
-capture's original wall-clock start. Original files are never moved, split or
-modified. Existing exports are not overwritten. Cancellation keeps finished files
-and removes the current partial file.
-
-Export copies original PCM/float sample bytes from WAV/RF64 sources, including
-multiple contiguous source files per track. It preserves sample rate, channels and
-sample format, bypassing project/track/take FX, gain, normalization and subsequent
-item edits. It uses the captured original timeline/source mapping, not a mix render.
-WAV metadata chunks such as BWF/iXML are not copied. Other formats (FLAC, WavPack,
-MP3, W64, etc.) are rejected. Regions outside available audio, source gaps, mixed
-sample rates and unverified recordings are rejected rather than padded silently.
-Output automatically uses RF64 when it exceeds RIFF size limits.
-
-The recording must finish through this Scheduler to collect its source map.
-After a crash or interrupted recovery, inspect/export the recovered recording
-manually in REAPER. Files under the project directory are stored as relative paths
-so moving that entire directory preserves export access. Externally stored sources
-must remain accessible at their original locations. Band capture records remain
-available after deleting schedule rows; deleting rows never deletes audio/regions.
-
-Export runs in small deferred chunks, may be cancelled and is unavailable during
-recording. Upcoming slots continue to be watched; a recording start cancels any
-unfinished export. Close the Scheduler to cancel an active export.
-The application does not change global REAPER file-splitting preferences. Native
-size limits or enabled file splitting may still create multiple source files per
-track; pause/resume itself does not create a new file. Configure WAV/RF64 and the
-file-size settings in REAPER when one physical WAV per track is required.
+not trigger this additional project save.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.8).
+The window title shows the running version (for example, Recording Scheduler v2.6.9).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -219,12 +170,11 @@ keep the sidecar with the project. Failed recovery-file writes disable future st
 Corrupt data is preserved for recovery instead of overwritten. A crash before
 finalization can leave compact items in the project. Source boundary maps are
 retained in the sidecar for manual recovery; reopening does not resume an open
-recording or automatically rearrange interrupted material. Missing/conflicting
-items stop automatic placement and block export rather than modifying originals.
+recording or automatically rearrange interrupted material. Old source files are never moved or deleted automatically.
 
 Reopening automatically watches future slots. Obsolete saved pause flags are
 ignored. Version 2 plans retain separate slots. Existing Continuous / Shared WAV plans now use separate slots; their earlier
-recordings and export maps remain unchanged. Format version 4
+recordings and metadata remain unchanged. Format version 4
 adds source-boundary maps and reads formats 2 and 3. Past starts become Missed; previously
 active slots become Interrupted. Old repeated entries remain as individual slots. Pending legacy slots
 with pre/post-roll are converted to visible direct start/end times, preserving the
@@ -263,15 +213,13 @@ hardware was required. The normal preflight and recording adapter were used.
 ```sh
 TZ=Europe/Berlin lua tests/recording_scheduler_test.lua
 TZ=Europe/Berlin lua tests/recording_scheduler_host_test.lua
-TZ=Europe/Berlin lua tests/recording_scheduler_export_test.lua
 luac -p Tools/JG_Recording_Scheduler.lua
 ```
 
 The tests use the real parser, state machine, storage, adapter and GUI loop with a
 mock REAPER host. They cover timing, migration, dedicated folders, ownership,
 file verification, cancelled edits and project-directory destination placement.
-Generated PCM fixtures additionally verify sample-byte-accurate region cuts, split
-source files, format handling and cancellation. The native two-track/three-slot test and its limitations are documented in
+The native two-track/three-slot test and its limitations are documented in
 [the pause test report](recording-scheduler-pause-test.md). Tests with the intended
 input hardware remain necessary before unattended use; output-recording probes
 cannot validate every driver's latency compensation or disk behavior.

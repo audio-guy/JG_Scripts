@@ -26,7 +26,8 @@
 - Separate slots is the only available recording mode. Migrate saved Continuous /
   Shared WAV plans to separate slots; no recording-mode selector. Clock-aligned
   live items take priority over sharing one source file. Preserve historical capture
-  maps, original audio and region-based export for earlier shared recordings.
+  metadata and original audio from earlier shared recordings. No band-folder export;
+  each new slot already records directly into its own folder.
 - Separate slots stop/start into their own folders; transitions can leave a gap.
 - See `docs/recording-scheduler.md` for behavior, recovery and host-test requirements.
 
