@@ -228,7 +228,12 @@ test('single schedule view, settings, activity window and editor preserve data a
   end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
   api.ImGui_Checkbox=function(_,label,value) assert(label~='Open end'); return false,value end
-  api.ImGui_InputText=function(_,key,value) shown[key]=true; for _,locked in pairs(locks) do if locked then return false,value end end; return typed[key]~=nil,typed[key] or value end
+  api.ImGui_InputTextFlags_EnterReturnsTrue=function() return 1 end
+  api.ImGui_InputText=function(_,key,value,flags)
+    shown[key]=true; for _,locked in pairs(locks) do if locked then return false,value end end
+    if flags==1 then return clicked=='Enter',typed[key] or value end
+    return typed[key]~=nil,typed[key] or value
+  end
   api.ImGui_Combo=api.ImGui_Checkbox
   api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
   api.ImGui_Selectable=function(_,label) assert(label~='Schedule' and label~='Setup' and label~='Activity'); return tab==label end
@@ -251,13 +256,14 @@ test('single schedule view, settings, activity window and editor preserve data a
     end
     frame('Add slot'); frame()
     assert(shown['##name'] and shown['##start'] and not shown['##pre'])
-    frame('Save slot',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
+    frame('Enter',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
     local f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); local saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture'); eq(captured.state.enabled,true)
     frame('Add slot'); frame()
     frame('Save slot',{['##name']='Overlap attempt',['##date']='301102',['##enddate']='301102',['##start']='21:30',['##finish']='22:30'})
     assert(shown['Overlap: Future capture / Overlap attempt. Adjust the times before saving.'], 'Save rejection must be visible immediately beside the form action')
     eq(#captured.state.slots,2); frame(); assert(shown['Shorten and save'])
+    frame('Enter'); eq(#captured.state.slots,2); assert(shown['Shorten and save'])
     captured.state.revision=captured.state.revision+1
     frame('Shorten and save'); eq(#captured.state.slots,2)
     assert(shown['The schedule changed. Save again to review the overlap.'])
@@ -295,7 +301,7 @@ test('single schedule view, settings, activity window and editor preserve data a
     local project_file=h.project_file
     h.project_file=function() return '' end
     frame('Add slot'); frame()
-    frame('Save slot',{['##name']='Unsaved capture',['##date']='301103',['##enddate']='301103',['##start']='21:00',['##finish']='22:00'})
+    frame('Enter',{['##name']='Unsaved capture',['##date']='301103',['##enddate']='301103',['##start']='21:00',['##finish']='22:00'})
     eq(#captured.state.slots,3)
     assert(shown['Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'])
     frame(); assert(shown['##name'], 'Rejected draft must stay open')

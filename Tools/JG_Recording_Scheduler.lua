@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.5
+-- @version 2.5.6
 -- @changelog
+--   Save slot forms with Enter from any input field, preserving overlap confirmation.
 --   Edit the running slot name/end directly and update its band region and stop time.
 --   Remove Extend by 5 min.
 --   Always watch schedules while open; remove Pause/Resume controls.
@@ -32,7 +33,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.5' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.6' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -865,10 +866,12 @@ local function run(r)
       Failed=0xFF8585FF,Missed=0xF1C777FF,Partial=0xF1C777FF,Interrupted=0xF1C777FF}
     r.ImGui_TextColored(ctx,colors[label] or 0xD5DBE3FF,label)
   end
+  local submit_on_enter=false
   local function input(key)
     r.ImGui_SetNextItemWidth(ctx,-1)
-    local changed,value=r.ImGui_InputText(ctx,'##'..key,form[key])
-    if changed then
+    local submitted,value=r.ImGui_InputText(ctx,'##'..key,form[key],r.ImGui_InputTextFlags_EnterReturnsTrue())
+    if submitted then submit_on_enter=true end
+    if value~=form[key] then
       pending_trim=nil
       -- Keep same-day dates in sync until the user deliberately chooses another end date.
       if key=='date' and form.enddate==form.date then form.enddate=value end
@@ -912,6 +915,7 @@ local function run(r)
     error=err or ''
   end
   local function draw_editor(now)
+    submit_on_enter=false
     text(editing and 'Edit slot' or 'New slot')
     field('Name','name')
     if r.ImGui_BeginTable(ctx,'Slot times',2,r.ImGui_TableFlags_SizingStretchSame()) then
@@ -941,7 +945,7 @@ local function run(r)
       if r.ImGui_Button(ctx,'Shorten and save') then commit_form(now,true) end
       r.ImGui_SameLine(ctx)
       if r.ImGui_Button(ctx,'Keep editing') then pending_trim=nil; error='' end
-    elseif r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) then commit_form(now) end
+    elseif r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) or submit_on_enter then commit_form(now) end
     r.ImGui_SameLine(ctx)
     if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
     if editor_open and error~='' then text(error) end
