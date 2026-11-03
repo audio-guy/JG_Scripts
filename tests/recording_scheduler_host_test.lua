@@ -168,6 +168,16 @@ test('continuous host creates linked regions and captures original source positi
   eq(c.files[1].position,70200); eq(c.files[1].length,8); eq(c.files[1].offset,0)
   eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
 end)
+test('appended band region and confirmed previous end update together',function()
+  local h,api=rig(); local regions={{pos=100,finish=101,name='First'}}
+  api.EnumProjectMarkers3=function(_,i) local v=regions[i+1]; if not v then return 0 end; return 1,true,v.pos,v.finish,v.name,i+1,0 end
+  api.AddProjectMarker2=function(_,_,pos,finish,name) regions[#regions+1]={pos=pos,finish=finish,name=name}; return #regions end
+  api.SetProjectMarker3=function(_,id,_,pos,finish,name) regions[id]={pos=pos,finish=finish,name=name}; return true end
+  local c={position=100,wall=1000,bands={{region=1,start=1000,name='First',open=true}}}
+  assert(h:append_band(c,{start=1010,finish=1020,name='Second'},{start=1000,name='First'}))
+  eq(#c.bands,2); eq(regions[1].finish,110); eq(regions[2].pos,110); eq(regions[2].finish,120)
+  eq(c.bands[1].open,false)
+end)
 test('manual stop closes only open-ended band regions and preserves edited names',function()
   local h,api=rig(); local updated={}
   api.EnumProjectMarkers3=function(_,i)
@@ -334,8 +344,9 @@ test('single schedule view, settings, activity window and editor preserve data a
     local has_countdown=false; for label in pairs(shown) do if label:match('^%d+:%d%d:%d%d left$') then has_countdown=true end end
     assert(has_countdown, 'Running slot must show remaining time in its row')
     captured:stop(os.time()+1)
-    frame('Add slot'); frame('Save slot',{['##name']='Open end test',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
-    frame(); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
+    local expected_default='Slot '..captured.state.next_id
+    frame('Add slot'); frame('Save slot',{['##name']='',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
+    frame(); eq(captured.state.slots[#captured.state.slots].name,expected_default); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
     frame('Undo')
     frame('Recording settings')
     api.ImGui_Combo=function(_,key,value) return key=='##mode',0 end

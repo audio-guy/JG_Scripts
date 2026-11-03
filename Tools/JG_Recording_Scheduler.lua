@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.7
+-- @version 2.5.8
 -- @changelog
+--   Use numbered Slot names for blank names and allow adding slots during recording in both modes.
 --   Show a remaining-time countdown in the slot list during recording.
 --   Save slot forms with Enter from any input field, preserving overlap confirmation.
 --   Edit the running slot name/end directly and update its band region and stop time.
@@ -34,7 +35,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.7' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.8' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -85,8 +86,8 @@ function Core.midnight(t)
   return os.time(day)
 end
 function Core.bounds(s) return s.start-s.pre, s.finish and s.finish+s.post end
-function Core.make(form)
-  if trim(form.name)=='' then return nil,'Enter a slot name.' end
+function Core.make(form,default_name)
+  local name=trim(form.name)=='' and (default_name or 'Slot 1') or form.name
   local start,err=Core.datetime(form.date,form.start); if not start then return nil,err end
   local finish
   if trim(form.finish or '')~='' then
@@ -96,7 +97,7 @@ function Core.make(form)
     if not finish then return nil,'End: '..err end
     if finish<=start then return nil,'End must be after start. For overnight recordings, enter the next date.' end
   end
-  return {id=0,name=form.name,start=start,finish=finish,pre=0,post=0,status='Scheduled',note='',actual_start=nil,actual_end=nil,folder=''}
+  return {id=0,name=name,start=start,finish=finish,pre=0,post=0,status='Scheduled',note='',actual_start=nil,actual_end=nil,folder=''}
 end
 function Core.conflict(slots)
   local pending={}
@@ -347,6 +348,57 @@ function Engine:edit_live(id,draft,now)
   slot.name,slot.finish=draft.name,draft.finish
   if self.continuous then self.active.finish=self.session[#self.session].finish end
   self:log(now,'Updated running slot: '..slot.name..'. End: '..(slot.finish and os.date('%y%m%d %H:%M:%S',slot.finish) or 'manual stop'))
+  return true
+end
+function Engine:append_live(draft,now,trim_id)
+  if not self.active then return nil,'The recording has ended. Save the slot again.' end
+  if draft.start<=now then return nil,'Start must be in the future.' end
+  if not self.continuous then
+    -- Validate against the running slot as well as the pending plan, without
+    -- changing transport ownership or its recording history during validation.
+    local trial=copy(self.state); trial.slots={}
+    for _,s in ipairs(self.state.slots) do
+      local candidate=copy(s)
+      if s==self.active then candidate.status='Scheduled'; candidate.actual_start=nil end
+      trial.slots[#trial.slots+1]=candidate
+    end
+    local ok,err=Core.apply(trial,{draft},nil,trim_id)
+    if not ok then return nil,err,Core.offer_trim(trial,draft) end
+    for i,s in ipairs(trial.slots) do
+      if s.id==self.active.id then
+        self.active.finish,self.active.post=s.finish,s.post
+        trial.slots[i]=self.active
+      end
+    end
+    self.state.slots,self.state.next_id=trial.slots,trial.next_id
+    self:log(now,'Added slot during recording: '..draft.name)
+    return true
+  end
+  local last=self.session[#self.session]
+  if draft.start<=last.start then return nil,'During recording, add new slots after the last planned slot.' end
+  local needs_trim=not last.finish or last.finish>draft.start
+  if needs_trim and trim_id~=last.id then
+    return nil,'',{id=last.id,name=last.name,finish=draft.start,revision=self.state.revision}
+  end
+  local check={copy(draft)}
+  for _,s in ipairs(self.session) do
+    local v=copy(s); v.status='Scheduled'
+    if v.id==last.id and needs_trim then v.finish=draft.start; v.post=0 end
+    check[#check+1]=v
+  end
+  for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then check[#check+1]=s end end
+  if Core.conflict(check) then return nil,'The new slot overlaps the plan. Adjust its times.' end
+  if self.capture and self.host.append_band then
+    local ok,err=self.host:append_band(self.capture,draft,needs_trim and last or nil)
+    if not ok then return nil,err end
+  end
+  if needs_trim then last.finish=draft.start; last.post=0 end
+  local slot=copy(draft); slot.id=self.state.next_id; self.state.next_id=slot.id+1
+  slot.status='In session'; slot.folder=self.active.folder
+  self.state.slots[#self.state.slots+1]=slot
+  table.sort(self.state.slots,function(a,b) return a.start<b.start end)
+  self.session[#self.session+1]=slot; self.active.finish=slot.finish
+  self:log(now,'Added slot to running capture: '..slot.name)
   return true
 end
 function Engine:tick(now,mono)
@@ -690,6 +742,19 @@ function Host:begin_capture(slots,now)
   end
   return c
 end
+function Host:append_band(c,draft,previous)
+  local pos=c.position+draft.start-c.wall
+  local ending=draft.finish and c.position+draft.finish-c.wall or pos+1
+  local id=self.r.AddProjectMarker2(self.project,true,pos,ending,draft.name,-1,0)
+  if id<0 then return nil,'REAPER could not create the new band region. The slot was not added.' end
+  if previous then
+    local shortened=copy(previous); shortened.finish=draft.start
+    local ok,err=self:edit_band(c,previous,shortened)
+    if not ok then self.r.DeleteProjectMarker(self.project,id,true); return nil,err end
+  end
+  c.bands[#c.bands+1]={region=id,start=draft.start,name=draft.name,open=not draft.finish}
+  return true
+end
 function Host:regions()
   local regions={}; local i=0
   while true do
@@ -832,6 +897,7 @@ local function run(r)
   local function snapshot() undo=Core.serialize(state) end
   local function clear_form() live_edit=false; pending_trim=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not engine.active and not export_task end
+  local function can_add() return not export_task end
   local function can_edit_slot(slot)
     return not export_task and ((not engine.active and Core.can_edit(slot)) or engine:live_slot(slot.id)~=nil)
   end
@@ -891,7 +957,7 @@ local function run(r)
       error='Save the REAPER project first (Cmd/Ctrl+S), then save the slot.'
       return
     end
-    local s,err=Core.make(form)
+    local s,err=Core.make(form,'Slot '..(editing or state.next_id))
     if s then
       if live_edit then
         local ok; ok,err=engine:edit_live(editing,s,now)
@@ -902,14 +968,18 @@ local function run(r)
           pending_trim=nil; error='The schedule changed. Save again to review the overlap.'; return
         end
         local before=Core.serialize(state)
-        local ok; ok,err=Core.apply(state,{s},editing,confirm_trim and pending_trim.id or nil)
+        local ok
+        if engine.active then
+          if editing then err='Only the currently recording slot can be edited during capture.'
+          else ok,err,pending_trim=engine:append_live(s,now,confirm_trim and pending_trim.id or nil) end
+        else ok,err=Core.apply(state,{s},editing,confirm_trim and pending_trim.id or nil) end
         if ok then
-          undo=before
+          undo=not engine.active and before or nil
           selected_id=state.next_id-1; clear_form(); editor_open=false
           save()
-          if not loaderr and not host.storage_error and not engine.clock_hold then engine:watch(now) end
+          if not engine.active and not loaderr and not host.storage_error and not engine.clock_hold then engine:watch(now) end
         else
-          pending_trim=Core.offer_trim(state,s,editing)
+          if not engine.active then pending_trim=Core.offer_trim(state,s,editing) end
         end
       end
     end
@@ -918,7 +988,7 @@ local function run(r)
   local function draw_editor(now)
     submit_on_enter=false
     text(editing and 'Edit slot' or 'New slot')
-    field('Name','name')
+    field('Name  /  optional','name')
     if r.ImGui_BeginTable(ctx,'Slot times',2,r.ImGui_TableFlags_SizingStretchSame()) then
       -- Separate label/input rows prevent frame baseline carry-over between columns.
       for _,pair in ipairs({{{'Start date  /  YYMMDD','date'},{'Start time  /  HH:MM','start'}},{{'End date  /  YYMMDD','enddate'},{'End time  /  optional','finish'}}}) do
@@ -934,7 +1004,7 @@ local function run(r)
       r.ImGui_EndTable(ctx)
     end
     muted('Leave end time blank for manual stop.')
-    local preview=Core.make(form)
+    local preview=Core.make(form,'Slot '..(editing or state.next_id))
     r.ImGui_Separator(ctx)
     if preview then
       local begin,ending=Core.bounds(preview)
@@ -1015,7 +1085,7 @@ local function run(r)
       if error~='' then text(error) end
       return
     end
-    if editor_open and (editable() or live_edit) then draw_editor(now); return end
+    if editor_open and (editable() or live_edit or (not editing and can_add())) then draw_editor(now); return end
     if #state.captures>0 then
       r.ImGui_BeginDisabled(ctx,not setup_editable())
       if r.ImGui_Button(ctx,'Export band folders...') then
@@ -1026,9 +1096,11 @@ local function run(r)
       r.ImGui_EndDisabled(ctx)
       if not setup_editable() then muted('Finish recording before exporting.') end
     end
-    r.ImGui_BeginDisabled(ctx,not editable())
+    r.ImGui_BeginDisabled(ctx,not can_add())
     if r.ImGui_Button(ctx,'Add slot',110,0) then start_editor() end
+    r.ImGui_EndDisabled(ctx)
     r.ImGui_SameLine(ctx)
+    r.ImGui_BeginDisabled(ctx,not editable())
     r.ImGui_BeginDisabled(ctx,not undo)
     if r.ImGui_Button(ctx,'Undo') then
       local old=Core.deserialize(undo)

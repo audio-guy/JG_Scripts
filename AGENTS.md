@@ -68,3 +68,8 @@
 - Allow editing the currently recording slot's name and end, with a fixed start.
   Update its linked region and effective stop together; reject past ends/overlaps.
   No Extend by 5 min control. Keep historical slots and active transport protected.
+
+- Blank names default to Slot N using the slot number. Allow Add slot during recording
+  in both modes. Separate slots retain independent folders; continuous additions
+  extend the current capture after its last band. Confirm any predecessor shortening
+  and validate overlaps before changing the running plan or its regions.
