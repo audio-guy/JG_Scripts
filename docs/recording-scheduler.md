@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.2
+# Recording Scheduler 2.6.3
 
 ## Purpose
 
@@ -19,7 +19,7 @@ Load `Tools/JG_Recording_Scheduler.lua` in REAPER's Actions list. Requires ReaIm
 0.10 or newer. The optional js_ReaScriptAPI extension supplies the native folder
 picker; without it, the destination can still be entered manually.
 
-1. Save the project and arm the intended audio input tracks.
+1. Save the project and arm the intended audio or MIDI input tracks.
 2. In **Recording settings**, choose the recording destination with **Choose folder...**.
    **Use project folder** uses the effective project recording path instead.
 3. In **Schedule**, select **Add slot**, enter a name, start and end, and save.
@@ -78,6 +78,21 @@ The root may be absolute or relative to the saved project. Cancelling the folder
 picker preserves the previous path. Separate-slot directories may be reused;
 REAPER supplies unique filenames. Existing shared-session directories remain unchanged.
 
+## MIDI recording
+
+Audio and MIDI inputs are supported, including mixed sessions. Tracks must use
+Record: input (audio or MIDI). Output recording, MIDI overdub and MIDI replace
+remain excluded to protect existing material. A MIDI recording is verified by
+new takes containing notes, CC/program events or text/SysEx events. Existing takes
+and empty MIDI takes do not count as successful input capture.
+
+REAPER's MIDI storage preference is retained: embedded MIDI is stored in the RPP,
+not as a WAV or necessarily as a file in the slot folder. After a MIDI recording,
+the Scheduler saves the already named project, including its other current edits,
+after restoring the original recording destination. A save that cannot be confirmed
+marks the slot Failed with a request to save the project. Audio-only recording does
+not trigger this additional project save. Historical band WAV export is audio-only.
+
 ## Historical band regions and export
 
 Earlier Continuous / Shared WAV versions created named regions from the planned times.
@@ -130,7 +145,7 @@ file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.2).
+The window title shows the running version (for example, Recording Scheduler v2.6.3).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -178,7 +193,7 @@ Otherwise closing directly disables future starts and retains the plan.
 ## Readiness and limitations
 
 The automatic check verifies the saved/selected project, absence of another
-recording, armed audio-input tracks, open audio device, and disabled looping.
+recording, armed audio- or MIDI-input tracks, open audio device, and disabled looping.
 Normal or paused playback is stopped automatically immediately before seeking and
 starting the scheduled recording. If stopping fails, no recording command is sent. Destination folders
 are created and write-tested at each actual start. Existing manual
@@ -227,7 +242,7 @@ is preserved for compatibility, but templates are no longer available in the UI.
 |---|---|
 | Scheduled | Starts automatically at the planned time while the Scheduler is open |
 | Recording | The slot is recording |
-| Completed | New nonempty files with positive source duration found on every expected track |
+| Completed | New audio files or new MIDI events verified on every expected track |
 | Partial | Files found, but timing was late or the system clock changed |
 | Stopped | Recording stopped through manual intervention or script closure |
 | Missed | Start more than five seconds late, or entire window elapsed |
@@ -239,6 +254,14 @@ Pre-existing files and new files outside the slot folder do not count as success
 Inspect and listen to recordings before treating their audio as verified.
 
 ## Verification
+
+The native MIDI probe `tests/manual/recording_scheduler_midi_host.lua` was run in
+an isolated REAPER 7.78+dev0811/macOS-arm64 instance on 2026-11-03. Two MIDI-input
+tracks and two scheduled slots produced four items at their clock positions,
+containing notes and CC events. Both slots completed and all four MIDI sources
+were found in the saved RPP. Virtual-keyboard input was used; no external MIDI
+hardware was required. The normal preflight and recording adapter were used.
+
 
 ```sh
 TZ=Europe/Berlin lua tests/recording_scheduler_test.lua
@@ -262,7 +285,7 @@ and [js_ReaScriptAPI dialog definitions](https://github.com/juliansader/ReaExten
 Save validation is shown directly under the form buttons. Invalid dates, past starts
 or overlaps retain the draft and leave the existing plan unchanged. Saving slots
 requires a saved project, but does not require an already prepared audio device.
-Recording still requires valid armed audio inputs. A future slot fails visibly if these conditions
+Recording still requires valid armed audio or MIDI inputs. A future slot fails visibly if these conditions
 are not met at its start.
 
 A system-clock jump retains a safety hold: check the clock and reopen the Scheduler.

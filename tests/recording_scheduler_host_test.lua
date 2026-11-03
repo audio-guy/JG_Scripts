@@ -118,10 +118,10 @@ test('failed playback stop prevents the recording command',function()
   local ok,err=h:start(slot(),''); assert(not ok and err:find('Playback could not be stopped')); eq(#commands,0)
   h:restore(); eq(cfg.RECORD_PATH,'original')
 end)
-test('adapter rejects disconnected device, loops and MIDI inputs',function()
+test('adapter accepts MIDI input but rejects disconnected device and loops',function()
   local h,api=rig(); api.GetAudioDeviceInfo=function() return false,'' end; assert(not h:preflight()); api.GetAudioDeviceInfo=function() return true,'48000' end
   api.GetSetRepeatEx=function() return 1 end; assert(not h:preflight()); api.GetSetRepeatEx=function() return 0 end
-  api.GetMediaTrackInfo_Value=function(_,k) return k=='I_RECARM' and 1 or (k=='I_RECINPUT' and 4096 or 0) end; assert(not h:preflight())
+  api.GetMediaTrackInfo_Value=function(_,k) return k=='I_RECARM' and 1 or (k=='I_RECINPUT' and 4096 or 0) end; assert(h:preflight())
 end)
 test('native folder picker selects, cancels and reports missing extension',function()
   local h,api=rig(); local path,err=h:choose_folder(''); eq(path,nil); assert(err:find('js_ReaScriptAPI'))
@@ -283,6 +283,7 @@ test('single schedule view, settings, activity window and editor preserve data a
   local ok,err=pcall(function()
     M.run(api)
     assert(shown['Add slot'] and not shown['##name'] and not shown['Export log'])
+    assert(not shown['Separate slots / individual folders'])
     assert(not shown['Review setup'] and not shown['Select a slot to edit, duplicate or inspect its details.'])
     local function frame(button,values,selected)
       clicked,typed,tab,shown=button,values or {},selected,{}
@@ -453,6 +454,47 @@ test('resume rejects changed sample rate before touching transport',function()
     Main_OnCommandEx=function() error('Must not resume') end}, {})
   local t={}; h.expected={t}; h.tracks=function() return {t} end; h.selected=function() return true end; h.capture_rate=48000
   local ok,err=h:resume_capture({},1000); assert(not ok and err:find('sample rate'))
+end)
+test('MIDI verification requires new events and saves after restoring the destination',function()
+  local h,api,cfg,sources=rig()
+  api.GetMediaTrackInfo_Value=function(_,key) return key=='I_RECARM' and 1 or (key=='I_RECINPUT' and 4096 or 0) end
+  api.TakeIsMIDI=function() return true end
+  api.GetSetMediaItemTakeInfo_String=function(take) return true,take end
+  local count=1; api.MIDI_CountEvts=function() return 1,0,count,0 end -- CC-only recording is valid.
+  api.IsProjectDirty=function() return 0 end
+  local saves=0; api.Main_SaveProject=function(project,force) eq(project,h.project); eq(force,false); eq(cfg.RECORD_PATH,'original'); saves=saves+1 end
+  assert(h:preflight()); assert(h:start(slot(),'')); h:stop()
+  assert(not h:verify()); sources[1]='new-midi-take'
+  count=0; assert(not h:verify()); count=1; assert(h:verify())
+  h:restore(); assert(h:save_recorded_midi()); eq(saves,1); assert(h:save_recorded_midi()); eq(saves,1)
+end)
+test('existing MIDI and failed project saves cannot be reported as successful new recordings',function()
+  local h,api,cfg,sources=rig(); sources[1]='old-midi-take'
+  api.TakeIsMIDI=function() return true end
+  api.GetSetMediaItemTakeInfo_String=function(take) return true,take end
+  api.MIDI_CountEvts=function() return 1,3,0,0 end
+  api.GetMediaTrackInfo_Value=function(_,key) return key=='I_RECARM' and 1 or (key=='I_RECINPUT' and 4096 or 0) end
+  assert(h:start(slot(),'')); h:stop(); assert(not h:verify())
+  sources[2]='new-midi-take'; assert(h:verify()); h:restore()
+  api.Main_SaveProject=function() end; api.IsProjectDirty=function() return 1 end
+  local ok,err=h:save_recorded_midi(); assert(not ok and err:find('Save the project'))
+end)
+test('mixed audio and MIDI sessions require a valid result on both types of track',function()
+  local h,api=rig(); local audio,midi={},{}
+  local path=root..'/mixed.wav'; write(path,'audio data')
+  local audio_item={path=path}; local midi_item={midi=true,guid='midi'}
+  audio.items={audio_item}; midi.items={midi_item}
+  h.expected={audio,midi}; h.expected_settings={[audio]={input=0},[midi]={input=4096}}; h.saved={newpath=root}
+  api.ValidatePtr2=function() return true end
+  api.CountTrackMediaItems=function(t) return #t.items end
+  api.GetTrackMediaItem=function(t,i) return t.items[i+1] end
+  api.TakeIsMIDI=function(t) return t.midi or false end
+  api.GetMediaSourceFileName=function(t) return t.path or '' end
+  api.GetSetMediaItemTakeInfo_String=function(t) return true,t.guid end
+  api.MIDI_CountEvts=function() return 1,1,0,0 end
+  assert(h:verify())
+  audio.items={}; assert(not h:verify())
+  audio.items={audio_item}; midi.items={}; assert(not h:verify())
 end)
 for path in pairs(files) do os.remove(path) end
 for path in pairs(dirs) do os.remove(path) end

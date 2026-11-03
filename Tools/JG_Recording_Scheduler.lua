@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.2
+-- @version 2.6.3
 -- @changelog
+--   Allow MIDI input recording, verify new MIDI events, and save embedded MIDI with the project.
 --   Confirm the recording interruption before saving directly adjacent slots.
 --   Remove Shared WAV from scheduling; migrate plans to separate clock-aligned slots.
 --   Preserve historical capture maps and band export.
@@ -41,7 +42,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.2' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.3' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -294,11 +295,19 @@ function Engine:finalize(now,requested,reason)
     elseif not ok then s.status='Failed'; s.note=detail
     elseif requested~='Completed' and (not ending or now<ending) then s.status=requested; s.note=reason
     elseif s.note~='' or (self.continuous and self.active.note~='') then s.status='Partial'; s.note=s.note~='' and s.note or self.active.note
-    else s.status='Completed'; s.note='Recorded files found on every expected track. Audio content not checked.' end
+    else s.status='Completed'; s.note='Recording verified on every expected track. Review the captured content.' end
     self:log(now,Core.folder(s)..': '..s.status..'. '..(s.note or ''))
   end
   for _,path in ipairs(self.host.result_files or {}) do self:log(now,'Recorded file: '..path) end
-  self.host:restore(); self.session={}; self.active=nil; self.capture=nil; self.continuous=false; self.gap_paused=false
+  self.host:restore()
+  if self.host.save_recorded_midi then
+    local saved,problem=self.host:save_recorded_midi()
+    if not saved then
+      for _,slot in ipairs(self.session) do if slot.actual_start then slot.status='Failed'; slot.note=problem end end
+      self:log(now,problem)
+    end
+  end
+  self.session={}; self.active=nil; self.capture=nil; self.continuous=false; self.gap_paused=false
 end
 function Engine:update_session(now)
   if not self.continuous then return end
@@ -533,10 +542,10 @@ function Host:preflight(enabling)
   if self:project_file()=='' then return nil,'Save the REAPER project before scheduling.' end
   if (r.GetPlayStateEx(self.project)&4)~=0 then return nil,'Another recording is already running. It will not be stopped or taken over.' end
   local tracks=self:tracks()
-  if #tracks==0 then return nil,'Arm at least one audio track.' end
+  if #tracks==0 then return nil,'Arm at least one audio or MIDI track.' end
   for _,t in ipairs(tracks) do
     local input=r.GetMediaTrackInfo_Value(t,'I_RECINPUT')
-    if input<0 or input>=4096 or r.GetMediaTrackInfo_Value(t,'I_RECMODE')~=0 then return nil,'Armed tracks must use audio inputs and Record: input (audio or MIDI).' end
+    if input<0 or r.GetMediaTrackInfo_Value(t,'I_RECMODE')~=0 then return nil,'Armed tracks must have an audio or MIDI input and use Record: input (audio or MIDI).' end
   end
   local device=r.GetAudioDeviceInfo('SRATE')
   if not device then return nil,'The audio device is not open.' end
@@ -598,6 +607,34 @@ function Host:source_map()
   end
   return files,lengths
 end
+function Host:midi_map()
+  local result={}; local r=self.r
+  for _,track in ipairs(self.expected) do
+    if r.ValidatePtr2(self.project,track,'MediaTrack*') then
+      for i=0,r.CountTrackMediaItems(track)-1 do
+        local item=r.GetTrackMediaItem(track,i)
+        for j=0,r.CountTakes(item)-1 do
+          local take=r.GetTake(item,j)
+          if take and r.TakeIsMIDI(take) then
+            local _,guid=r.GetSetMediaItemTakeInfo_String(take,'GUID','',false)
+            local valid,notes,cc,sysex=r.MIDI_CountEvts(take)
+            if guid and guid~='' then result[guid]={track=track,length=r.GetMediaItemInfo_Value(item,'D_LENGTH'),
+              events=valid and valid~=0 and (notes+cc+sysex) or 0} end
+          end
+        end
+      end
+    end
+  end
+  return result
+end
+function Host:save_recorded_midi()
+  if not self.midi_needs_save then return true end
+  self.midi_needs_save=false
+  if not self:valid() or self:project_file()=='' then return nil,'MIDI is in memory. Save the recording project before closing REAPER.' end
+  self.r.Main_SaveProject(self.project,false)
+  if self.r.IsProjectDirty(self.project)~=0 then return nil,'MIDI project save could not be confirmed. Save the project before closing REAPER.' end
+  return true
+end
 function Host:start(slot,root,continuous,now,origin)
   local r=self.r
   if self:recording() then return nil,'Another recording is already running. It will not be stopped or taken over.' end
@@ -621,7 +658,7 @@ function Host:start(slot,root,continuous,now,origin)
   local _,oldpath=r.GetSetProjectInfo_String(self.project,'RECORD_PATH','',false)
   local _,tag=r.GetSetProjectInfo_String(self.project,'RECTAG','',false)
   self.saved={path=oldpath,tag=tag,newpath=path,newtag=Core.folder(slot)}
-  self.expected=self:tracks(); self.baseline=self:source_map()
+  self.expected=self:tracks(); self.baseline=self:source_map(); self.baseline_midi=self:midi_map(); self.midi_needs_save=false
   self.expected_settings={}
   for _,t in ipairs(self.expected) do self.expected_settings[t]={input=r.GetMediaTrackInfo_Value(t,'I_RECINPUT'),mode=r.GetMediaTrackInfo_Value(t,'I_RECMODE')} end
   local _,rate=r.GetAudioDeviceInfo('SRATE'); self.capture_rate=tonumber(rate)
@@ -656,7 +693,20 @@ function Host:verify()
     end
   end
   self.result_files=paths
-  for _,t in ipairs(self.expected) do if not seen[t] then return nil,'Recorded files could not be confirmed on every expected track. Inspect the project and disk.' end end
+  local midi_seen={}
+  for guid,item in pairs(self:midi_map()) do
+    if not (self.baseline_midi or {})[guid] and item.length>0 then
+      self.midi_needs_save=true -- Retain new MIDI items even if another track failed.
+      if item.events>0 then midi_seen[item.track]=true end
+    end
+  end
+  for _,t in ipairs(self.expected) do
+    local settings=self.expected_settings and self.expected_settings[t]
+    local input=settings and settings.input or self.r.GetMediaTrackInfo_Value(t,'I_RECINPUT')
+    if (input&4096)~=0 then
+      if not midi_seen[t] then return nil,'No new MIDI events could be confirmed on an expected track. Check its MIDI input and inspect the project.' end
+    elseif not seen[t] then return nil,'Recorded audio files could not be confirmed on every expected audio track. Inspect the project and disk.' end
+  end
   if #self.expected==0 then return nil,'No recorded tracks could be verified.' end
   return true
 end
@@ -1421,7 +1471,6 @@ local function run(r)
         end
         r.ImGui_EndTable(ctx)
       end
-      muted('Separate slots / individual folders')
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       -- One persistent message area, including the editor.

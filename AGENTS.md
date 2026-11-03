@@ -75,3 +75,9 @@
   "will cause a brief interruption", never "may". Offer Save anyway / Keep editing;
   Enter must not confirm. Show the same notice with overlap-shortening confirmation.
   Never interrupt unattended recording with a transition-time dialog.
+
+- Support audio and MIDI inputs in Record: input mode, including mixed sessions.
+  Verify new MIDI takes/events independently of audio files; never count existing
+  takes. Preserve REAPER's MIDI storage preference and save the named project after
+  MIDI capture, restoring the recording destination first. Report save failures.
+- Do not show a redundant Separate slots mode line in the main header.
