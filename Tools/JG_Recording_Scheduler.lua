@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.10
+-- @version 2.6.11
 -- @changelog
+--   Remove the duplicate transport header; use REAPER transport to stop a slot.
 --   Open Add slot with Enter in the focused schedule view.
 --   Remove band-folder export; slots already record directly into their own folders.
 --   Accept compact HHMMSS input for slot start and end times.
@@ -48,7 +49,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.10' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.11' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -374,7 +375,7 @@ function Engine:edit_live(id,draft,now)
   local slot=self:live_slot(id)
   if not slot then return nil,'This slot is no longer recording. Its recording history cannot be changed.' end
   if draft.start~=slot.start then return nil,'The start of a running recording cannot be changed.' end
-  if draft.finish and draft.finish<=now then return nil,'End must be in the future. Use Stop recording to stop now.' end
+  if draft.finish and draft.finish<=now then return nil,'End must be in the future. Use the REAPER transport to stop now.' end
   local check={}
   for _,v in ipairs(self.state.slots) do
     if v==slot or v.status=='Scheduled' or v.status=='In session' or v.status=='Captured' then
@@ -1242,28 +1243,6 @@ local function run(r)
         start_editor(); opened_with_enter=true
       end
       r.ImGui_PushFont(ctx,nil,16)
-      local nextslot
-      for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
-      if (engine.active or nextslot) and r.ImGui_BeginTable(ctx,'Transport header',2,r.ImGui_TableFlags_SizingStretchProp()) then
-        r.ImGui_TableSetupColumn(ctx,'State',r.ImGui_TableColumnFlags_WidthStretch())
-        r.ImGui_TableSetupColumn(ctx,'Controls',r.ImGui_TableColumnFlags_WidthFixed(),240)
-        r.ImGui_TableNextRow(ctx); r.ImGui_TableNextColumn(ctx)
-        status(engine.active and (engine.gap_paused and 'Waiting between slots' or 'Recording') or (nextslot and not ready and 'Not ready' or (state.enabled and 'Scheduled' or (nextslot and 'Not ready' or 'Idle'))))
-        r.ImGui_SameLine(ctx)
-        if engine.active then
-          text(engine.active.name)
-          local _,ending=Core.bounds(engine.active)
-          muted(ending and ('Remaining  '..duration(ending-now)) or 'Open-ended / manual stop')
-        elseif nextslot then
-          text('Next: '..nextslot.name)
-          muted(stamp(nextslot.start)..'  /  in '..duration(Core.bounds(nextslot)-now))
-        end
-        r.ImGui_TableNextColumn(ctx)
-        if engine.active then
-          if r.ImGui_Button(ctx,'Stop recording',-1,0) and not opened_with_enter then engine:stop(now) end
-        end
-        r.ImGui_EndTable(ctx)
-      end
       local project_name=r.GetProjectName(project,'')
       muted((project_name~='' and project_name or 'Unsaved project')..'  /  '..#host:tracks()..' armed tracks')
       -- One persistent message area, including the editor.

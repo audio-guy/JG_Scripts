@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.10
+# Recording Scheduler 2.6.11
 
 ## Purpose
 
@@ -94,18 +94,18 @@ not trigger this additional project save.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.10).
+The window title shows the running version (for example, Recording Scheduler v2.6.11).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
-The transport header is hidden when no recording is active or scheduled.
-The UI is designed for an experienced operator. The compact header shows state and
-next/active slot; one message area displays concrete issues. There are no navigation
+There is no separate transport header. Recording status and countdown appear in
+the slot row; use REAPER transport Stop to end the current slot manually.
+The UI is designed for an experienced operator. The list shows each slot and its status; one message area displays concrete issues. There are no navigation
 tabs or Recording help panel. Technical checks remain enforced. There is no
 admin/guest distinction.
 
 
-- **Schedule:** next recording/countdown, transport controls and scrollable plan.
+- **Schedule:** scrollable plan with recording status and countdown.
   Length / left shows planned duration while waiting and a seconds countdown while
   recording. Open-ended recordings show Manual stop.
   Select a row for Edit, Duplicate or Delete. Double-click an editable slot to open
@@ -135,7 +135,7 @@ plan or regions. Adding during capture clears the Undo snapshot.
 Deleting, duplicating and undoing plan changes remain locked during capture. Completed recording history cannot be edited.
 If a recording ends while its editor is open, saving is rejected. Live edits clear
 the plan Undo snapshot to prevent restoring stale recording state.
-Stop recording ends the current slot. Future independent slots
+Stopping the REAPER transport ends the current slot. Future independent slots
 remain scheduled. Closing during an active recording asks whether to stop and close or keep running.
 Otherwise closing directly disables future starts and retains the plan.
 

@@ -82,8 +82,9 @@
   takes. Preserve REAPER's MIDI storage preference and save the named project after
   MIDI capture, restoring the recording destination first. Report save failures.
 - Do not show a redundant Separate slots mode line in the main header.
-- Hide the empty transport header; no Idle / No upcoming slots line when no recording
-  is active or scheduled.
+- No transport header or duplicate countdown/Stop button. Show remaining time in
+  the recording slot row. REAPER transport Stop ends the active slot; future slots
+  stay scheduled.
 - Enter/keypad Enter in the focused schedule overview opens Add slot with name focus.
   In the editor it saves; never reuse the opening keypress to submit the new form or
-  trigger Stop recording. Keep adjacency/overlap confirmations explicit.
+  trigger unrelated actions. Keep adjacency/overlap confirmations explicit.
