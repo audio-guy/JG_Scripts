@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.9
+-- @version 2.6.10
 -- @changelog
+--   Open Add slot with Enter in the focused schedule view.
 --   Remove band-folder export; slots already record directly into their own folders.
 --   Accept compact HHMMSS input for slot start and end times.
 --   Record slot folders directly beside the saved project; remove destination settings.
@@ -47,7 +48,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.9' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.10' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -1012,6 +1013,7 @@ local function run(r)
   end
   local show_activity=false
   local editor_open=false
+  local opened_with_enter=false
   local selected_id=nil
   local function duration(seconds)
     seconds=math.max(0,math.floor(seconds))
@@ -1030,7 +1032,7 @@ local function run(r)
     -- ReaImGui only returns the new buffer when InputText returns true.
     -- Keep normal change reporting so Tab/click never discards an edited field.
     local changed,value=r.ImGui_InputText(ctx,'##'..key,form[key])
-    if (r.ImGui_IsItemFocused(ctx) or r.ImGui_IsItemDeactivated(ctx)) and
+    if not opened_with_enter and (r.ImGui_IsItemFocused(ctx) or r.ImGui_IsItemDeactivated(ctx)) and
       (r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_Enter(),false) or r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_KeypadEnter(),false)) then
       submit_on_enter=true
     end
@@ -1125,7 +1127,7 @@ local function run(r)
       if r.ImGui_Button(ctx,'Shorten and save') then commit_form(now,true) end
       r.ImGui_SameLine(ctx)
       if r.ImGui_Button(ctx,'Keep editing') then pending_trim=nil; error='' end
-    elseif r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) or submit_on_enter then commit_form(now) end
+    elseif (r.ImGui_Button(ctx,editing and 'Save changes' or 'Save slot',140,0) or submit_on_enter) and not opened_with_enter then commit_form(now) end
     r.ImGui_SameLine(ctx)
     if r.ImGui_Button(ctx,'Cancel',90,0) then clear_form(); editor_open=false end
     if editor_open and error~='' then text(error) end
@@ -1234,6 +1236,11 @@ local function run(r)
     local visible,open=r.ImGui_Begin(ctx,WINDOW_TITLE,true)
     local quit=false
     if visible then
+      opened_with_enter=false
+      if not editor_open and not close_requested and r.ImGui_IsWindowFocused(ctx,r.ImGui_FocusedFlags_ChildWindows()) and
+        (r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_Enter(),false) or r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_KeypadEnter(),false)) then
+        start_editor(); opened_with_enter=true
+      end
       r.ImGui_PushFont(ctx,nil,16)
       local nextslot
       for _,s in ipairs(state.slots) do if s.status=='Scheduled' and (not nextslot or Core.bounds(s)<Core.bounds(nextslot)) then nextslot=s end end
@@ -1253,7 +1260,7 @@ local function run(r)
         end
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
-          if r.ImGui_Button(ctx,'Stop recording',-1,0) then engine:stop(now) end
+          if r.ImGui_Button(ctx,'Stop recording',-1,0) and not opened_with_enter then engine:stop(now) end
         end
         r.ImGui_EndTable(ctx)
       end

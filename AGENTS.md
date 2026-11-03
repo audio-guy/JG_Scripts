@@ -84,3 +84,6 @@
 - Do not show a redundant Separate slots mode line in the main header.
 - Hide the empty transport header; no Idle / No upcoming slots line when no recording
   is active or scheduled.
+- Enter/keypad Enter in the focused schedule overview opens Add slot with name focus.
+  In the editor it saves; never reuse the opening keypress to submit the new form or
+  trigger Stop recording. Keep adjacency/overlap confirmations explicit.

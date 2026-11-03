@@ -245,6 +245,9 @@ test('single schedule view, settings, activity window and editor preserve data a
   local last_input,focused_input,seen_values=nil,'##finish',{}
   api.ImGui_IsItemFocused=function() return last_input==focused_input and clicked~='Enter' and clicked~='KeypadEnter' end
   api.ImGui_IsItemDeactivated=function() return last_input==focused_input and (clicked=='Enter' or clicked=='KeypadEnter') end
+  local main_focused=true
+  api.ImGui_IsWindowFocused=function() return main_focused end
+  api.ImGui_FocusedFlags_ChildWindows=function() return 0 end
   api.ImGui_Key_Enter=function() return 'Enter' end
   api.ImGui_Key_KeypadEnter=function() return 'KeypadEnter' end
   api.ImGui_IsKeyPressed=function(_,key,repeat_key) eq(repeat_key,false); return clicked==key end
@@ -279,7 +282,10 @@ test('single schedule view, settings, activity window and editor preserve data a
       clicked,typed,tab,shown=button,values or {},selected,{}
       assert(queued)(); eq(windows,0); eq(disabled,0); eq(ids,0); eq(tables,0)
     end
-    frame('Add slot'); frame()
+    main_focused=false; frame('Enter'); assert(not shown['##name'])
+    main_focused=true; frame('KeypadEnter'); assert(shown['##name']); eq(#captured.state.slots,1)
+    frame('Cancel'); frame('Enter'); assert(shown['##name']); eq(#captured.state.slots,1)
+    frame()
     assert(shown['##name'] and shown['##start'] and not shown['##pre'])
     frame(nil,{['##name']='Future capture',['##date']='301102',['##enddate']='301102'})
     focused_input='##start'; frame(nil,{['##start']='2100'})

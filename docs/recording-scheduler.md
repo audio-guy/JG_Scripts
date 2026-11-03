@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.9
+# Recording Scheduler 2.6.10
 
 ## Purpose
 
@@ -94,7 +94,7 @@ not trigger this additional project save.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.9).
+The window title shows the running version (for example, Recording Scheduler v2.6.10).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -113,7 +113,8 @@ admin/guest distinction.
   initially; failures remain visible. Show history reveals past entries.
   Delete removes any inactive slot from the plan, including failed and completed
   slots. It never deletes audio files. Undo restores the removed entry.
-- **Slot editor:** optional name, dates and times. Add slot focuses the name field immediately. Blank names become Slot N using the slot number. Use Duplicate for similar slots. Save or Enter in any input field returns to the plan after validation; Cancel
+- **Slot editor:** optional name, dates and times. Add slot focuses the name field immediately. Enter or keypad Enter in the focused
+  schedule view opens Add slot; the opening keypress never saves the new draft. Blank names become Slot N using the slot number. Use Duplicate for similar slots. Save or Enter in any input field returns to the plan after validation; Cancel
   discards the draft. Tab and mouse focus changes retain edits immediately. Both Return
   and keypad Enter submit from an input field. Enter never confirms an overlap adjustment automatically. Existing slots keep running on schedule while you plan another.
 - **Activity log:** opens a separate optional window with events and verified file
