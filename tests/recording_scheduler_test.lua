@@ -30,6 +30,16 @@ end
 local function tick(e,t) return e:tick(t,t) end
 
 test('strict valid date/time formats',function() eq(C.datetime('261102','1930'),C.datetime('2026-11-02','19:30')) end)
+test('six-digit times preserve seconds for starts and ends',function()
+  for _,pair in ipairs{{'000000','00:00:00'},{'005301','00:53:01'},{'175930','17:59:30'},{'235959','23:59:59'}} do
+    eq(C.datetime('261103',pair[1]),C.datetime('261103',pair[2]))
+  end
+  local s=assert(C.make(form{start='193015',finish='203045'}))
+  eq(s.finish-s.start,3630)
+end)
+test('compact seconds reject out-of-range and incomplete times',function()
+  for _,value in ipairs{'240000','126000','125960','12345','1234567'} do assert(not C.datetime('261103',value)) end
+end)
 test('reject invalid hour and minute',function() assert(not C.datetime('261102','2561')); assert(not C.datetime('261102','2360')) end)
 test('reject impossible calendar dates',function() assert(not C.datetime('260231','1200')); assert(not C.datetime('260229','1200')); assert(C.datetime('280229','1200')) end)
 test('reject malformed end rather than converting to open end',function() assert(not C.make(form{finish='123'})) end)

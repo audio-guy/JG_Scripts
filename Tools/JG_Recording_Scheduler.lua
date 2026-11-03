@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.7
+-- @version 2.6.8
 -- @changelog
+--   Accept compact HHMMSS input for slot start and end times.
 --   Record slot folders directly beside the saved project; remove destination settings.
 --   Focus the name field immediately when opening Add slot.
 --   Hide the transport header when no recording is active or scheduled.
@@ -45,7 +46,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.7' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.8' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -63,12 +64,13 @@ function Core.datetime(date, time)
   local y,m,d = date:match('^(%d%d%d%d)%-(%d%d)%-(%d%d)$')
   if not y then y,m,d=date:match('^(%d%d)(%d%d)(%d%d)$'); if y then y=2000+tonumber(y) end end
   local h,n,sec=time:match('^(%d%d):(%d%d):(%d%d)$')
+  if not h then h,n,sec=time:match('^(%d%d)(%d%d)(%d%d)$') end
   if not h then h,n=time:match('^(%d%d):(%d%d)$') end
   sec=tonumber(sec) or 0
   if not h then h,n=time:match('^(%d%d)(%d%d)$') end
   y,m,d,h,n=tonumber(y),tonumber(m),tonumber(d),tonumber(h),tonumber(n)
   if not y or not h or y<2000 or y>2099 or m<1 or m>12 or d<1 or d>31 or h>23 or n>59 or sec>59 then
-    return nil,'Enter a valid date (YYMMDD) and time (HH:MM or HHMM).'
+    return nil,'Enter a valid date (YYMMDD) and time (HH:MM, HH:MM:SS, HHMM or HHMMSS).'
   end
   local matches={}
   for _,dst in ipairs({false,true}) do

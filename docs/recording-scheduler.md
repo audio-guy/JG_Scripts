@@ -1,4 +1,4 @@
-# Recording Scheduler 2.6.7
+# Recording Scheduler 2.6.8
 
 ## Purpose
 
@@ -27,8 +27,8 @@ Load `Tools/JG_Recording_Scheduler.lua` in REAPER's Actions list. Requires ReaIm
    The schedule is always watched while the Scheduler is open. There is no Pause
    or Resume step.
 
-Dates use `YYMMDD`; times use `HH:MM` or `HHMM`. Seconds (`HH:MM:SS`) are accepted
-for exact legacy timing. Invalid and ambiguous daylight-saving times are rejected.
+Dates use `YYMMDD`; times accept `HH:MM`, `HHMM`, `HH:MM:SS` and `HHMMSS`.
+For example, `175930` means `17:59:30`, for both start and end times. Invalid and ambiguous daylight-saving times are rejected.
 Overlaps never silently change the plan. When the new start falls inside the
 previous scheduled slot (including an open-ended slot), the editor offers to end
 that slot at the new start. **Shorten and save** applies both changes together;
@@ -143,7 +143,7 @@ file-size settings in REAPER when one physical WAV per track is required.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.6.7).
+The window title shows the running version (for example, Recording Scheduler v2.6.8).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
