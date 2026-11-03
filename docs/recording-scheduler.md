@@ -1,4 +1,4 @@
-# Recording Scheduler 2.5.4
+# Recording Scheduler 2.5.5
 
 ## Purpose
 
@@ -8,7 +8,8 @@ pre/post-roll controls, templates or confirmation checklist.
 
 - **Continuous recording:** one transport recording from the first future slot to
   the last end, including every gap (even overnight). New projects default to this.
-  The schedule is frozen during capture. Bands become editable REAPER regions.
+  The running slot’s name and end remain editable; its start stays fixed. Bands
+  become editable REAPER regions.
 - **Separate slots:** each slot starts/stops into its own folder. Existing version 2
   plans retain this mode. Adjacent slots can have an audio gap.
 
@@ -80,8 +81,8 @@ REAPER supplies unique filenames. Continuous sessions use unique directories.
 Continuous recording creates named regions from the planned times. These are
 editing boundaries, not transport commands. They remain editable after recording;
 changing a region does not reschedule a recording. An open-ended final region is
-closed when recording stops. Extending capture adds recording time, not region
-length: adjust the last region afterward if needed.
+closed when recording stops. Editing a running slot updates its linked region
+name/end. Changing the final slot’s end also changes the continuous capture stop.
 
 1. Finish the recording and adjust the band regions in REAPER. Keep their region
    IDs: move/resize/rename them, rather than deleting/recreating or renumbering them.
@@ -120,7 +121,7 @@ capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.4).
+The window title shows the running version (for example, Recording Scheduler v2.5.5).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -142,9 +143,18 @@ admin/guest distinction.
   paths, newest first. Closing it leaves scheduling active. Export log writes
   `<project>.rpp.recording-log.tsv` and replaces the previous export.
 
-Plan changes are allowed while waiting for scheduled starts, but locked during an
-active recording or export. The active end can be extended by five minutes. In Separate slots mode this must
-not conflict with a later slot. Continuous mode extends the entire capture. Undo restores the last plan change.
+While recording, double-click the currently recording slot or use Edit selected.
+Its name and end time can change; its start date/time are locked. Leave the end
+blank for manual stop if no later slot would overlap. The new end must be in the
+future and must not overlap another slot. The list, linked band region and capture
+stop are updated together without restarting transport. A continuous capture still
+runs to its final slot: editing an earlier band does not shorten the entire session.
+The Extend by 5 min control has been removed.
+
+Adding, deleting, duplicating and undoing plan changes remain locked during capture,
+as do mode/destination changes. Completed recording history cannot be edited.
+If a recording ends while its editor is open, saving is rejected. Live edits clear
+the plan Undo snapshot to prevent restoring stale recording state.
 In Continuous mode the scheduled stop is the last slot’s end, including all bands
 and gaps. Stop recording ends the current capture. Future independent slots
 remain scheduled. Closing during an active recording asks whether to stop and close or keep running.

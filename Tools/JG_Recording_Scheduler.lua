@@ -1,7 +1,9 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.4
+-- @version 2.5.5
 -- @changelog
+--   Edit the running slot name/end directly and update its band region and stop time.
+--   Remove Extend by 5 min.
 --   Always watch schedules while open; remove Pause/Resume controls.
 --   Edit slots by double-click and align date/time labels and inputs in shared rows.
 --   Treat blank end times as open-ended; offer confirmed shortening of an overlapping predecessor.
@@ -30,7 +32,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.4' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.5' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -317,19 +319,32 @@ function Engine:stop(now,reason)
   end
   return true
 end
-function Engine:extend(now,seconds)
-  if not self.active or not self.active.finish then return nil,'This recording has no scheduled end.' end
-  if self.continuous then
-    self.active.finish=self.active.finish+seconds
-    self:log(now,'Continuous recording extended; band regions are unchanged.')
-    return true
+function Engine:live_slot(id)
+  if not self.active then return nil end
+  for _,slot in ipairs(self.session) do
+    if slot.id==id and slot.status=='Recording' then return slot end
   end
-  local proposed=copy(self.active); proposed.finish=proposed.finish+seconds; proposed.status='Scheduled'
-  local check={proposed}
-  for _,s in ipairs(self.state.slots) do if s.status=='Scheduled' then check[#check+1]=s end end
-  if Core.conflict(check) then return nil,'Extension overlaps a later slot.' end
-  self.active.finish=proposed.finish
-  self:log(now,'Recording extended to '..stamp(proposed.finish)..'.')
+end
+function Engine:edit_live(id,draft,now)
+  local slot=self:live_slot(id)
+  if not slot then return nil,'This slot is no longer recording. Its recording history cannot be changed.' end
+  if draft.start~=slot.start then return nil,'The start of a running recording cannot be changed.' end
+  if draft.finish and draft.finish<=now then return nil,'End must be in the future. Use Stop recording to stop now.' end
+  local check={}
+  for _,v in ipairs(self.state.slots) do
+    if v==slot or v.status=='Scheduled' or v.status=='In session' or v.status=='Captured' then
+      local candidate=copy(v==slot and draft or v); candidate.status='Scheduled'; check[#check+1]=candidate
+    end
+  end
+  local a,b=Core.conflict(check)
+  if a then return nil,'Overlap: '..a.name..' / '..b.name..'. Adjust the end before saving.' end
+  if self.capture and self.host.edit_band then
+    local ok,err=self.host:edit_band(self.capture,slot,draft)
+    if not ok then return nil,err end
+  end
+  slot.name,slot.finish=draft.name,draft.finish
+  if self.continuous then self.active.finish=self.session[#self.session].finish end
+  self:log(now,'Updated running slot: '..slot.name..'. End: '..(slot.finish and os.date('%y%m%d %H:%M:%S',slot.finish) or 'manual stop'))
   return true
 end
 function Engine:tick(now,mono)
@@ -676,18 +691,33 @@ end
 function Host:regions()
   local regions={}; local i=0
   while true do
-    local ok,isregion,pos,finish,name,id=self.r.EnumProjectMarkers3(self.project,i)
+    local ok,isregion,pos,finish,name,id,color=self.r.EnumProjectMarkers3(self.project,i)
     if ok==0 then break end
-    if isregion then regions[id]={position=pos,finish=finish,name=name} end
+    if isregion then regions[id]={position=pos,finish=finish,name=name,color=color} end
     i=i+1
   end
   return regions
+end
+function Host:edit_band(c,slot,draft)
+  local regions=self:regions()
+  for _,band in ipairs(c.bands) do if band.start==slot.start then
+    local region=regions[band.region]
+    if not region then return nil,'The band region is missing. Restore it before editing this recording.' end
+    local ending=draft.finish and c.position+draft.finish-c.wall or region.finish
+    if ending<=region.position then return nil,'The new end is before the edited region start.' end
+    if not self.r.SetProjectMarker3(self.project,band.region,true,region.position,ending,draft.name,region.color or 0) then
+      return nil,'REAPER could not update the band region. The slot was not changed.'
+    end
+    band.name=draft.name; band.open=not draft.finish
+    return true
+  end end
+  return nil,'No linked band region was found for this slot.'
 end
 function Host:finish_regions(c,now)
   local regions=self:regions()
   for _,b in ipairs(c.bands) do if b.open then
     local region=regions[b.region]
-    if region then self.r.SetProjectMarker3(self.project,b.region,true,region.position,math.max(region.position+0.001,c.position+now-c.wall),region.name,0) end
+    if region then self.r.SetProjectMarker3(self.project,b.region,true,region.position,math.max(region.position+0.001,c.position+now-c.wall),region.name,region.color or 0) end
   end end
 end
 function Host:capture_files()
@@ -776,6 +806,7 @@ local function run(r)
   local editing=nil; local error=loaderr or ''
   local close_requested=false; local show_history=false; local last_saved=-1; local last_check=0; local readiness=''; local ready=false
   local export_preview,export_task=nil,nil
+  local live_edit=false
   local pending_trim=nil
   local undo=nil
   local function save()
@@ -797,8 +828,11 @@ local function run(r)
     sidecar=file~='' and file..'.jg-scheduler' or nil
   end
   local function snapshot() undo=Core.serialize(state) end
-  local function clear_form() pending_trim=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
+  local function clear_form() live_edit=false; pending_trim=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not engine.active and not export_task end
+  local function can_edit_slot(slot)
+    return not export_task and ((not engine.active and Core.can_edit(slot)) or engine:live_slot(slot.id)~=nil)
+  end
   local function setup_editable() return not engine.active and not export_task end
   local function text(s) r.ImGui_TextWrapped(ctx,tostring(s)) end
   local function edit(s,duplicate)
@@ -845,6 +879,7 @@ local function run(r)
   local function start_editor(s,duplicate)
     error=''
     if s then edit(s,duplicate) else clear_form(); form.date=os.date('%y%m%d'); form.enddate=form.date end
+    live_edit=s and not duplicate and engine:live_slot(s.id)~=nil or false
     editor_open=true
   end
   local function commit_form(now,confirm_trim)
@@ -854,7 +889,10 @@ local function run(r)
     end
     local s,err=Core.make(form)
     if s then
-      if s.start<=now then err='Start must be in the future.'
+      if live_edit then
+        local ok; ok,err=engine:edit_live(editing,s,now)
+        if ok then clear_form(); editor_open=false; undo=nil; save() end
+      elseif s.start<=now then err='Start must be in the future.'
       else
         if confirm_trim and (not pending_trim or pending_trim.revision~=state.revision) then
           pending_trim=nil; error='The schedule changed. Save again to review the overlap.'; return
@@ -882,7 +920,11 @@ local function run(r)
         r.ImGui_TableNextRow(ctx)
         for _,cell in ipairs(pair) do r.ImGui_TableNextColumn(ctx); text(cell[1]) end
         r.ImGui_TableNextRow(ctx)
-        for _,cell in ipairs(pair) do r.ImGui_TableNextColumn(ctx); input(cell[2]) end
+        for _,cell in ipairs(pair) do
+          r.ImGui_TableNextColumn(ctx)
+          r.ImGui_BeginDisabled(ctx,live_edit and (cell[2]=='date' or cell[2]=='start'))
+          input(cell[2]); r.ImGui_EndDisabled(ctx)
+        end
       end
       r.ImGui_EndTable(ctx)
     end
@@ -968,7 +1010,7 @@ local function run(r)
       if error~='' then text(error) end
       return
     end
-    if editor_open and editable() then draw_editor(now); return end
+    if editor_open and (editable() or live_edit) then draw_editor(now); return end
     if #state.captures>0 then
       r.ImGui_BeginDisabled(ctx,not setup_editable())
       if r.ImGui_Button(ctx,'Export band folders...') then
@@ -1015,7 +1057,7 @@ local function run(r)
           r.ImGui_TableNextColumn(ctx)
           if r.ImGui_Selectable(ctx,s.name..'##slot',selected_id==s.id,r.ImGui_SelectableFlags_SpanAllColumns()|r.ImGui_SelectableFlags_AllowDoubleClick()) then
             selected_id=s.id
-            if r.ImGui_IsMouseDoubleClicked(ctx,0) and editable() and Core.can_edit(s) then start_editor(s,false) end
+            if r.ImGui_IsMouseDoubleClicked(ctx,0) and can_edit_slot(s) then start_editor(s,false) end
           end
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,os.date('%y%m%d',s.start))
           r.ImGui_TableNextColumn(ctx); r.ImGui_Text(ctx,clocktime(s.start))
@@ -1034,10 +1076,10 @@ local function run(r)
     local selected
     for _,s in ipairs(state.slots) do if s.id==selected_id then selected=s; break end end
     if selected then
-      r.ImGui_BeginDisabled(ctx,not editable())
-      r.ImGui_BeginDisabled(ctx,not Core.can_edit(selected))
+      r.ImGui_BeginDisabled(ctx,not can_edit_slot(selected))
       if r.ImGui_Button(ctx,'Edit selected') then start_editor(selected,false) end
       r.ImGui_EndDisabled(ctx); r.ImGui_SameLine(ctx)
+      r.ImGui_BeginDisabled(ctx,not editable())
       if r.ImGui_Button(ctx,'Duplicate') then start_editor(selected,true) end
       r.ImGui_SameLine(ctx); r.ImGui_BeginDisabled(ctx,selected.status=='Recording' or selected.status=='Starting')
       if r.ImGui_Button(ctx,'Delete') then
@@ -1102,7 +1144,6 @@ local function run(r)
         r.ImGui_TableNextColumn(ctx)
         if engine.active then
           if r.ImGui_Button(ctx,'Stop recording',-1,0) then engine:stop(now) end
-          if engine.active and engine.active.finish and r.ImGui_Button(ctx,'Extend by 5 min',-1,0) then local ok,err=engine:extend(now,300); if not ok then error=err end end
         end
         r.ImGui_EndTable(ctx)
       end

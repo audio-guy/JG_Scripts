@@ -144,18 +144,28 @@ test('continuous host creates linked regions and captures original source positi
     assert(isregion); local id=#regions+1; regions[id]={pos=pos,finish=finish,name=name}; return id
   end
   api.EnumProjectMarkers3=function(_,i) local r=regions[i+1]; if not r then return 0 end; return 1,true,r.pos,r.finish,r.name,i+1,0 end
+  api.SetProjectMarker3=function(_,id,isregion,pos,finish,name)
+    assert(isregion); regions[id]={pos=pos,finish=finish,name=name}; return true
+  end
   api.GetTrackName=function() return true,'Input' end; api.GetTrackGUID=function() return '{track}' end
-  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 70200 or 6 end
+  api.GetMediaItemInfo_Value=function(_,key) return key=='D_POSITION' and 70200 or 8 end
   api.GetMediaItemTakeInfo_Value=function(_,key) return key=='D_PLAYRATE' and 1 or 0 end
   local e=E.new(st,h); e:watch(a.start-10); e:tick(a.start,0)
   eq(#commands,1); eq(#regions,2); eq(regions[1].pos,70200); eq(regions[2].pos,70204)
   eq(#st.captures,1); eq(st.captures[1].bands[2].region,2)
-  e:tick(a.start+3,3); eq(h:recording(),true)
+  local draft={}; for k,v in pairs(st.slots[1]) do draft[k]=v end
+  draft.name='Band A revised'; draft.finish=a.start+3
+  assert(e:edit_live(st.slots[1].id,draft,a.start+1)); eq(regions[1].finish,70203); eq(regions[1].name,'Band A revised')
+  e:tick(a.start+4,4); eq(h:recording(),true)
+  draft={}; for k,v in pairs(st.slots[2]) do draft[k]=v end; draft.finish=a.start+8
+  assert(e:edit_live(st.slots[2].id,draft,a.start+4)); eq(regions[2].finish,70208)
+  eq(e.active.finish,a.start+8)
   local path=cfg.RECORD_PATH..'/input.wav'; write(path,'recorded audio'); sources[1]=path
-  e:tick(a.start+6,6); eq(h:recording(),false); eq(#commands,1)
+  e:tick(a.start+6,6); eq(h:recording(),true)
+  e:tick(a.start+8,8); eq(h:recording(),false); eq(#commands,1)
   eq(st.slots[1].status,'Completed'); eq(st.slots[2].status,'Completed')
   local c=assert(C.deserialize(C.serialize(st))).captures[1]
-  eq(c.files[1].position,70200); eq(c.files[1].length,6); eq(c.files[1].offset,0)
+  eq(c.files[1].position,70200); eq(c.files[1].length,8); eq(c.files[1].offset,0)
   eq(c.files[1].path,path:sub(#root+2)); eq(cfg.RECORD_PATH,'original')
 end)
 test('full collapsed UI executes actual scheduled start and stop',function()
@@ -218,7 +228,7 @@ test('single schedule view, settings, activity window and editor preserve data a
   end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
   api.ImGui_Checkbox=function(_,label,value) assert(label~='Open end'); return false,value end
-  api.ImGui_InputText=function(_,key,value) shown[key]=true; return typed[key]~=nil,typed[key] or value end
+  api.ImGui_InputText=function(_,key,value) shown[key]=true; for _,locked in pairs(locks) do if locked then return false,value end end; return typed[key]~=nil,typed[key] or value end
   api.ImGui_Combo=api.ImGui_Checkbox
   api.ImGui_Button=function(_,label) shown[label]=true; for _,locked in pairs(locks) do if locked then return false end end; return clicked==label end
   api.ImGui_Selectable=function(_,label) assert(label~='Schedule' and label~='Setup' and label~='Activity'); return tab==label end
@@ -292,6 +302,16 @@ test('single schedule view, settings, activity window and editor preserve data a
     h.project_file=project_file
     frame('Save slot'); eq(#captured.state.slots,4)
     frame(); eq(captured.state.enabled,true)
+    local live=captured.state.slots[#captured.state.slots]
+    local original_start=live.start
+    api.SetEditCurPos2=function() end
+    captured:start_session(live,os.time())
+    double_click=true; frame(nil,nil,live.name..'##slot'); double_click=false; frame()
+    assert(shown['Save changes'] and not shown['Extend by 5 min'])
+    frame('Save changes',{['##name']='Live edited',['##start']='23:59',['##finish']='22:10'})
+    frame(); eq(live.start,original_start); eq(live.name,'Live edited')
+    assert(shown['Add slot'] and not shown['##name']); eq(h:recording(),true)
+    captured:stop(os.time()+1)
     frame('Add slot'); frame('Save slot',{['##name']='Open end test',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
     frame(); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
     frame('Undo')
