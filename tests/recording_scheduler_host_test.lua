@@ -242,7 +242,7 @@ test('single schedule view, settings, activity window and editor preserve data a
   api.ImGui_EndDisabled=function() locks[disabled]=nil; disabled=disabled-1; assert(disabled>=0) end
   api.ImGui_BeginTable=function() tables=tables+1; return true end; api.ImGui_EndTable=function() tables=tables-1 end
   api.ImGui_PushID=function() ids=ids+1 end; api.ImGui_PopID=function() ids=ids-1 end
-  for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth'}) do api['ImGui_'..key]=noop end
+  for _,key in ipairs({'TextWrapped','Separator','SameLine','TableSetupColumn','TableHeadersRow','TableNextColumn','TableNextRow','TableSetupScrollFreeze','Text','TextColored','PushFont','PopFont','SetNextItemWidth','SetKeyboardFocusHere'}) do api['ImGui_'..key]=noop end
   for _,key in ipairs({'TableFlags_Borders','TableFlags_RowBg','TableFlags_Resizable','TreeNodeFlags_DefaultOpen','TableFlags_ScrollY','TableFlags_SizingStretchProp','TableFlags_SizingStretchSame','TableColumnFlags_WidthFixed','TableColumnFlags_WidthStretch','SelectableFlags_SpanAllColumns','SelectableFlags_AllowDoubleClick'}) do api['ImGui_'..key]=function() return 0 end end
   local settings_open=false
   api.ImGui_CollapsingHeader=function(_,label)

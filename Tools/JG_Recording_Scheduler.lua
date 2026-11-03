@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.6.4
+-- @version 2.6.5
 -- @changelog
+--   Focus the name field immediately when opening Add slot.
 --   Hide the transport header when no recording is active or scheduled.
 --   Allow MIDI input recording, verify new MIDI events, and save embedded MIDI with the project.
 --   Confirm the recording interruption before saving directly adjacent slots.
@@ -43,7 +44,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.6.4' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.6.5' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -1114,6 +1115,7 @@ local function run(r)
   local live_edit=false
   local pending_trim=nil
   local pending_adjacent=nil
+  local focus_name=false
   local adjacency_warning="These slots meet without a gap. Starting a new recording file will cause a brief interruption."
   local undo=nil
   local function save()
@@ -1135,7 +1137,7 @@ local function run(r)
     sidecar=file~='' and file..'.jg-scheduler' or nil
   end
   local function snapshot() undo=Core.serialize(state) end
-  local function clear_form() live_edit=false; pending_trim=nil; pending_adjacent=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
+  local function clear_form() focus_name=false; live_edit=false; pending_trim=nil; pending_adjacent=nil; editing=nil; form.start=''; form.finish=''; form.name=''; error='' end
   local function editable() return not engine.active and not export_task end
   local function can_add() return not export_task end
   local function can_edit_slot(slot)
@@ -1175,6 +1177,7 @@ local function run(r)
   end
   local submit_on_enter=false
   local function input(key)
+    if key=='name' and focus_name then r.ImGui_SetKeyboardFocusHere(ctx); focus_name=false end
     r.ImGui_SetNextItemWidth(ctx,-1)
     -- ReaImGui only returns the new buffer when InputText returns true.
     -- Keep normal change reporting so Tab/click never discards an edited field.
@@ -1195,6 +1198,7 @@ local function run(r)
     error=''; pending_adjacent=nil; pending_trim=nil
     if s then edit(s,duplicate) else clear_form(); form.date=os.date('%y%m%d'); form.enddate=form.date end
     live_edit=s and not duplicate and engine:live_slot(s.id)~=nil or false
+    focus_name=not s
     editor_open=true
   end
   local function commit_form(now,confirm_trim,confirm_adjacent)
