@@ -252,10 +252,20 @@ test('single schedule view, settings, activity window and editor preserve data a
   end
   api.ImGui_TextWrapped=record; api.ImGui_Text=record
   api.ImGui_Checkbox=function(_,label,value) assert(label~='Open end'); return false,value end
+  local last_input,focused_input,seen_values=nil,'##finish',{}
+  api.ImGui_IsItemFocused=function() return last_input==focused_input and clicked~='Enter' and clicked~='KeypadEnter' end
+  api.ImGui_IsItemDeactivated=function() return last_input==focused_input and (clicked=='Enter' or clicked=='KeypadEnter') end
+  api.ImGui_Key_Enter=function() return 'Enter' end
+  api.ImGui_Key_KeypadEnter=function() return 'KeypadEnter' end
+  api.ImGui_IsKeyPressed=function(_,key,repeat_key) eq(repeat_key,false); return clicked==key end
   api.ImGui_InputTextFlags_EnterReturnsTrue=function() return 1 end
   api.ImGui_InputText=function(_,key,value,flags)
+    last_input=key; seen_values[key]=value
     shown[key]=true; for _,locked in pairs(locks) do if locked then return false,value end end
-    if flags==1 then return clicked=='Enter',typed[key] or value end
+    if flags==1 then
+      local submitted=clicked=='Enter' and key==focused_input
+      return submitted,submitted and (typed[key] or value) or value
+    end
     return typed[key]~=nil,typed[key] or value
   end
   api.ImGui_Combo=api.ImGui_Checkbox
@@ -280,7 +290,11 @@ test('single schedule view, settings, activity window and editor preserve data a
     end
     frame('Add slot'); frame()
     assert(shown['##name'] and shown['##start'] and not shown['##pre'])
-    frame('Enter',{['##name']='Future capture',['##date']='301102',['##enddate']='301102',['##start']='21:00',['##finish']='22:00'})
+    frame(nil,{['##name']='Future capture',['##date']='301102',['##enddate']='301102'})
+    focused_input='##start'; frame(nil,{['##start']='2100'})
+    focused_input='##finish'; frame('Tab')
+    eq(seen_values['##start'],'2100', 'Tab must retain the typed start time')
+    frame(nil,{['##finish']='22:00'}); frame('Enter')
     local f=assert(io.open(root..'/session.rpp.jg-scheduler','rb')); local saved=assert(C.deserialize(f:read('*a'))); f:close()
     eq(#saved.slots,2); eq(saved.slots[2].name,'Future capture'); eq(captured.state.enabled,true)
     frame('Add slot'); frame()
@@ -345,7 +359,9 @@ test('single schedule view, settings, activity window and editor preserve data a
     assert(has_countdown, 'Running slot must show remaining time in its row')
     captured:stop(os.time()+1)
     local expected_default='Slot '..captured.state.next_id
-    frame('Add slot'); frame('Save slot',{['##name']='',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
+    frame('Add slot'); frame(nil,{['##name']='',['##date']='301104',['##enddate']='301104',['##start']='21:00',['##finish']=''})
+    focused_input=nil; frame('Enter'); assert(shown['##name'], 'Enter outside a field must not submit')
+    focused_input='##start'; frame('KeypadEnter')
     frame(); eq(captured.state.slots[#captured.state.slots].name,expected_default); eq(captured.state.slots[#captured.state.slots].finish,nil); assert(shown['Add slot'] and not shown['##name'])
     frame('Undo')
     frame('Recording settings')

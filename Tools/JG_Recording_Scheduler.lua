@@ -1,7 +1,8 @@
 -- @description Recording Scheduler
 -- @author Julius Gass
--- @version 2.5.8
+-- @version 2.5.9
 -- @changelog
+--   Preserve field edits when tabbing; detect Enter separately from text updates.
 --   Use numbered Slot names for blank names and allow adding slots during recording in both modes.
 --   Show a remaining-time countdown in the slot list during recording.
 --   Save slot forms with Enter from any input field, preserving overlap confirmation.
@@ -35,7 +36,7 @@
 --   Timing is wall-clock/defer based, not sample accurate.
 --   Plans are stored in project extstate and a recovery sidecar next to the saved project.
 
-local VERSION = '2.5.8' -- Keep in sync with the ReaPack @version above.
+local VERSION = '2.5.9' -- Keep in sync with the ReaPack @version above.
 local WINDOW_TITLE = 'Recording Scheduler v'..VERSION..'###Recording Scheduler'
 local Core = {}
 local function copy(t) local r = {}; for k,v in pairs(t) do r[k]=v end; return r end
@@ -936,9 +937,14 @@ local function run(r)
   local submit_on_enter=false
   local function input(key)
     r.ImGui_SetNextItemWidth(ctx,-1)
-    local submitted,value=r.ImGui_InputText(ctx,'##'..key,form[key],r.ImGui_InputTextFlags_EnterReturnsTrue())
-    if submitted then submit_on_enter=true end
-    if value~=form[key] then
+    -- ReaImGui only returns the new buffer when InputText returns true.
+    -- Keep normal change reporting so Tab/click never discards an edited field.
+    local changed,value=r.ImGui_InputText(ctx,'##'..key,form[key])
+    if (r.ImGui_IsItemFocused(ctx) or r.ImGui_IsItemDeactivated(ctx)) and
+      (r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_Enter(),false) or r.ImGui_IsKeyPressed(ctx,r.ImGui_Key_KeypadEnter(),false)) then
+      submit_on_enter=true
+    end
+    if changed and value~=form[key] then
       pending_trim=nil
       -- Keep same-day dates in sync until the user deliberately chooses another end date.
       if key=='date' and form.enddate==form.date then form.enddate=value end

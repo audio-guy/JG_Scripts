@@ -124,7 +124,7 @@ capture may comprise several physically separate WAV files.
 
 ## Interface
 
-The window title shows the running version (for example, Recording Scheduler v2.5.8).
+The window title shows the running version (for example, Recording Scheduler v2.5.9).
 Restart the script after updating to load the new version. This identifies the
 loaded version; it does not check online for updates.
 
@@ -143,7 +143,8 @@ admin/guest distinction.
   Delete removes any inactive slot from the plan, including failed and completed
   slots. It never deletes audio files. Undo restores the removed entry.
 - **Slot editor:** optional name, dates and times. Blank names become Slot N using the slot number. Use Duplicate for similar slots. Save or Enter in any input field returns to the plan after validation; Cancel
-  discards the draft. Enter never confirms an overlap adjustment automatically. Existing slots keep running on schedule while you plan another.
+  discards the draft. Tab and mouse focus changes retain edits immediately. Both Return
+  and keypad Enter submit from an input field. Enter never confirms an overlap adjustment automatically. Existing slots keep running on schedule while you plan another.
 - **Recording settings:** collapsed configuration for recording mode and destination.
 - **Activity log:** opens a separate optional window with events and verified file
   paths, newest first. Closing it leaves scheduling active. Export log writes
