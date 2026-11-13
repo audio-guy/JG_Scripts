@@ -16,7 +16,9 @@ local function run(items, options)
     GetOS = function() return options.os or 'OSX64' end,
     CountSelectedMediaItems = function() return #items end,
     GetSelectedMediaItem = function(_, i) return items[i + 1] end,
-    GetActiveTake = function(item) return item.source and item end,
+    GetActiveTake = function() error('Do not restrict source collection to active takes') end,
+    CountTakes = function(item) return item.takes and #item.takes or (item.source and 1 or 0) end,
+    GetTake = function(item, i) return item.takes and item.takes[i + 1] or (i == 0 and item or nil) end,
     GetMediaItemTake_Source = function(take) return take.source end,
     GetMediaSourceParent = function(source) return source.parent end,
     GetMediaSourceFileName = function(source) return source.path or '' end,
@@ -68,7 +70,7 @@ end
 local source = {path = '/tmp/Äudio \' " $` test.wav'}
 local messages, calls, helper = run({{source = source}, {source = {parent = source}}, {}}, {export = arg[1]})
 assert(calls == 1 and messages[1]:find('Copied 1 source file', 1, true))
-assert(messages[1]:find('Skipped 1 item', 1, true))
+assert(messages[1]:find('Skipped 1 take(s) or empty item(s)', 1, true))
 assert(not helper:find(source.path, 1, true), 'Paths must be encoded as data')
 messages, calls = run({{source = {path = '/missing.wav'}}, {source = source}})
 assert(calls == 1 and messages[1]:find('Source file is no longer available', 1, true))
@@ -97,4 +99,27 @@ local entries = assert(helper:match('var entries = %[(.-)%];'))
 local n = 0
 for _ in entries:gmatch("'[^']+'") do n = n + 1 end
 assert(n == 3, 'Every distinct selected source must reach the OS helper')
+-- Inactive takes, wrapped sources and tracks outside the track selection must all count.
+messages, calls, helper, tip = run({
+  {track = 1, takes = {
+    {source = {path = '/tmp/active.wav'}},
+    {source = {path = '/tmp/inactive.wav'}},
+    {source = {parent = {parent = {path = '/tmp/reversed.wav'}}}},
+  }},
+  {track = 2, takes = {
+    {source = {path = '/tmp/other-track.wav'}},
+    {source = {path = '/tmp/inactive.wav'}},
+  }},
+})
+assert(calls == 1 and #messages == 0)
+assert(tip == 'Copied 4 unique source file(s) from 2 selected item(s).')
+entries = assert(helper:match('var entries = %[(.-)%];'))
+n = 0
+for _ in entries:gmatch("'[^']+'") do n = n + 1 end
+assert(n == 4, 'Inactive takes and sources across tracks must reach the OS helper')
+messages, calls, helper = run({
+  {takes = {{source = {}}, {source = {path = '/tmp/inactive.wav'}}}},
+})
+assert(calls == 1 and messages[1]:find('Copied 1 source file', 1, true))
+assert(messages[1]:find('Skipped 1 take(s)', 1, true))
 print('copy_source_media_to_clipboard_test: OK')

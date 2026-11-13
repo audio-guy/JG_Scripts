@@ -1,15 +1,15 @@
 -- @description Copy source media files to clipboard
 -- @author Julius Gass
--- @version 1.0.1
+-- @version 1.0.2
 -- @about
---   Copies the source files of selected items' active takes to the system clipboard.
+--   Copies the source files of all takes of selected items to the system clipboard.
 --   Paste in Finder (Cmd+V) or Windows Explorer (Ctrl+V) to copy the files.
 --   Copies entire original files, not trimmed items or rendered FX. Removes duplicates.
 --   Resolves section/reverse sources to their underlying files. In-project MIDI and
 --   empty items are skipped with a notice. Missing files abort without changing the clipboard.
 --   Supports macOS and Windows using built-in OS helpers; no REAPER extensions needed.
 -- @changelog
---   Run clipboard helpers asynchronously to keep REAPER responsive and avoid false timeout errors.
+--   Include every take of every selected item, including inactive takes across tracks.
 
 local TITLE = "Copy source media files to clipboard"
 local function message(text) reaper.ShowMessageBox(text, TITLE, 0) end
@@ -25,8 +25,7 @@ local count = reaper.CountSelectedMediaItems(0)
 if count == 0 then message("Select at least one media item."); return end
 
 local paths, seen, skipped = {}, {}, 0
-for i = 0, count - 1 do
-  local take = reaper.GetActiveTake(reaper.GetSelectedMediaItem(0, i))
+local function collect_take(take)
   local source = take and reaper.GetMediaItemTake_Source(take)
   local ancestors = {}
   while source and not ancestors[source] do
@@ -47,6 +46,18 @@ for i = 0, count - 1 do
     if not seen[key] then
       seen[key] = true
       paths[#paths + 1] = path
+    end
+  end
+end
+-- Item selection is project-wide; track selection and the active take do not limit it.
+for i = 0, count - 1 do
+  local item = reaper.GetSelectedMediaItem(0, i)
+  local take_count = reaper.CountTakes(item)
+  if take_count == 0 then
+    skipped = skipped + 1
+  else
+    for take_index = 0, take_count - 1 do
+      collect_take(reaper.GetTake(item, take_index))
     end
   end
 end
@@ -184,7 +195,7 @@ local function poll()
       if result ~= "JG_COPY_OK" then
         message("Could not copy source files to the clipboard.\n\n" .. result)
       elseif skipped > 0 then
-        message(string.format("Copied %d source file(s).\nSkipped %d item(s) without a source file (empty items or in-project MIDI).", #paths, skipped))
+        message(string.format("Copied %d source file(s).\nSkipped %d take(s) or empty item(s) without a source file (including in-project MIDI).", #paths, skipped))
       else
         local x, y = reaper.GetMousePosition()
         reaper.TrackCtl_SetToolTip(string.format("Copied %d unique source file(s) from %d selected item(s).", #paths, count), x + 16, y + 16, true)
