@@ -83,6 +83,10 @@
         <changelog><![CDATA[Copy selected items' active-take source files to the native macOS or Windows clipboard for pasting in Finder or Explorer. Copy entire original files, resolve section/reverse sources, remove duplicates and report missing or non-file sources. No extensions required.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
       </version>
+      <version name="1.0.1" author="Julius Gass">
+        <changelog><![CDATA[Run the native clipboard helper asynchronously so REAPER stays responsive. Read explicit completion status instead of treating a slow helper process exit as a failed copy. Check source availability in the helper instead of blocking REAPER on filesystem access.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Copy_Timecode_To_Clipboard.lua" type="script" desc="JG Copy Timecode To Clipboard">
