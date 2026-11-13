@@ -56,9 +56,21 @@ dofile(''' + json.dumps(str(SCRIPT)) + ''')
                        check=True, capture_output=True, text=True, timeout=15)
         return unicodedata.normalize('NFC', result_file.read_text())
 
+    def clipboard_paths():
+        code = "ObjC.import('AppKit'); var b=$.NSPasteboard.pasteboardWithName(" + json.dumps(board_name) + ");"
+        code += """
+var urls=b.readObjectsForClassesOptions($([$.NSURL]), $({}));
+var paths=[];
+if(!urls.isNil()) for(var i=0;i<Number(urls.count);i++) paths.push(ObjC.unwrap(urls.objectAtIndex(i).path));
+JSON.stringify(paths);
+"""
+        output = subprocess.check_output(['/usr/bin/osascript', '-l', 'JavaScript', '-e', code], text=True)
+        return json.loads(unicodedata.normalize('NFC', output))
+
     try:
         result = run(isolated)
         assert result == 'JG_COPY_OK', result
+        assert clipboard_paths() == paths
         print('13 unique source paths: OK')
         anchor = "if (!board.writeObjects(urls)) throw new Error('Could not write files to the clipboard.');"
         assert anchor in isolated
@@ -70,15 +82,30 @@ board.writeObjects(urls.subarrayWithRange($.NSMakeRange(0, 11)));
         result = run(partial)
         assert result.startswith('JG_COPY_ERROR:') and '13' in result and '11' in result, result
         assert paths[11] in result and paths[12] in result, result
-        print('13 collected / 11 in clipboard is reported as failure: OK')
+        print('Persistent partial replacement fails after bounded retries: OK')
+        once = isolated.replace(anchor, anchor + '''
+if (typeof truncatedOnce === 'undefined') {
+  truncatedOnce = true;
+  board.clearContents;
+  board.writeObjects(urls.subarrayWithRange($.NSMakeRange(0, 11)));
+}
+''')
+        result = run(once)
+        assert result == 'JG_COPY_OK', result
+        assert clipboard_paths() == paths
+        print('Temporary partial replacement is automatically repaired: OK')
         delayed = isolated.replace('$.NSThread.sleepForTimeInterval(0.25);', '''
-board.clearContents;
-board.writeObjects(urls.subarrayWithRange($.NSMakeRange(0, 11)));
+if (typeof replacedLater === 'undefined') {
+  replacedLater = true;
+  board.clearContents;
+  board.writeObjects(urls.subarrayWithRange($.NSMakeRange(0, 11)));
+}
 ''')
         assert delayed != isolated
         result = run(delayed)
-        assert result.startswith('JG_COPY_ERROR:') and paths[12] in result, result
-        print('Clipboard replacement after the first verification is detected: OK')
+        assert result == 'JG_COPY_OK', result
+        assert clipboard_paths() == paths
+        print('Delayed partial replacement is automatically repaired: OK')
         # Same count with a duplicate replacing a missing path must also fail.
         replaced = isolated.replace(anchor, anchor + '''
 var wrong = urls.mutableCopy;
@@ -89,6 +116,36 @@ board.writeObjects(wrong);
         result = run(replaced)
         assert result.startswith('JG_COPY_ERROR:'), result
         print('Equal count with a missing source is reported as failure: OK')
+        unrelated_path = str(root / 'new-user-copy.wav')
+        unrelated = isolated.replace(anchor, anchor + '''
+board.clearContents;
+board.writeObjects($([$.NSURL.fileURLWithPath(''' + json.dumps(unrelated_path) + ''')]));
+''')
+        result = run(unrelated)
+        assert result.startswith('JG_COPY_ERROR:'), result
+        assert clipboard_paths() == [unrelated_path], 'A new user copy must be preserved'
+        print('Unrelated copied files are preserved: OK')
+        text_copy = isolated.replace(anchor, anchor + '''
+board.clearContents;
+board.setStringForType($('new user copy'), $.NSPasteboardTypeString);
+''')
+        result = run(text_copy)
+        assert result.startswith('JG_COPY_ERROR:'), result
+        assert clipboard_paths() == [], 'A text copy must not be replaced with our files'
+        print('New text clipboard contents are not replaced: OK')
+        cancelled = isolated.replace(anchor, anchor + '''
+board.clearContents;
+board.writeObjects(urls.subarrayWithRange($.NSMakeRange(0, 11)));
+$.NSFileManager.defaultManager.removeItemAtPathError($(''' + json.dumps(str(helper)) + '''), null);
+''')
+        # Cancellation removes the marker, suppressing both retries and the result file.
+        helper.write_text(cancelled)
+        result_file.unlink(missing_ok=True)
+        subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', str(helper)],
+                       check=True, capture_output=True, text=True, timeout=15)
+        assert not result_file.exists()
+        assert clipboard_paths() == paths[:11], 'Cancelled helpers must not rewrite the clipboard'
+        print('Cancellation prevents later clipboard retries: OK')
     finally:
         subprocess.run(['/usr/bin/osascript', '-l', 'JavaScript', '-e',
                         "ObjC.import('AppKit'); $.NSPasteboard.pasteboardWithName("

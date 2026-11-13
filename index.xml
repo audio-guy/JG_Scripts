@@ -95,6 +95,10 @@
         <changelog><![CDATA[Read back and verify every native clipboard file path before reporting success. Report incomplete or replaced clipboard contents with expected/actual counts and missing source paths.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
       </version>
+      <version name="1.0.4" author="Julius Gass">
+        <changelog><![CDATA[Automatically restore incomplete macOS clipboard transfers with bounded retries and repeated path verification. Repair only subsets of the copied sources; preserve unrelated clipboard contents.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Copy_Timecode_To_Clipboard.lua" type="script" desc="JG Copy Timecode To Clipboard">

@@ -1,6 +1,6 @@
 -- @description Copy source media files to clipboard
 -- @author Julius Gass
--- @version 1.0.3
+-- @version 1.0.4
 -- @about
 --   Copies the source files of all takes of selected items to the system clipboard.
 --   Paste in Finder (Cmd+V) or Windows Explorer (Ctrl+V) to copy the files.
@@ -9,7 +9,7 @@
 --   empty items are skipped with a notice. Missing files abort without changing the clipboard.
 --   Supports macOS and Windows using built-in OS helpers; no REAPER extensions needed.
 -- @changelog
---   Verify clipboard file paths before reporting success; report missing entries.
+--   Retry incomplete clipboard transfers without replacing unrelated clipboard contents.
 
 local TITLE = "Copy source media files to clipboard"
 local function message(text) reaper.ShowMessageBox(text, TITLE, 0) end
@@ -127,25 +127,49 @@ entries.forEach(function(entry) {
 });
 var board = $.NSPasteboard.generalPasteboard;
 if (board.isNil()) throw new Error('The macOS clipboard service is unavailable.');
-board.clearContents;
-if (!board.writeObjects(urls)) throw new Error('Could not write files to the clipboard.');
-function verifyClipboard() {
+function inspectClipboard() {
   var actual = board.readObjectsForClassesOptions($([$.NSURL]), $({}));
   var actualCount = actual.isNil() ? 0 : Number(actual.count);
-  var missing = [];
+  var items = board.pasteboardItems;
+  var itemCount = items.isNil() ? 0 : Number(items.count);
+  var missing = [], related = actualCount > 0 && itemCount === actualCount;
   for (var i = 0; i < Number(urls.count); i++) {
     var expected = urls.objectAtIndex(i);
     if (actual.isNil() || !actual.containsObject(expected))
       missing.push(ObjC.unwrap(expected.path));
   }
-  if (actualCount !== Number(urls.count) || missing.length)
-    throw new Error('Clipboard verification failed. Expected ' + urls.count
-      + ' source file(s); found ' + actualCount + '.\nMissing source paths:\n' + missing.join('\n'));
+  for (var j = 0; j < actualCount; j++)
+    if (!urls.containsObject(actual.objectAtIndex(j))) related = false;
+  return {
+    complete: related && actualCount === Number(urls.count) && missing.length === 0,
+    related: related,
+    error: 'Clipboard verification failed. Expected ' + urls.count
+      + ' source file(s); found ' + actualCount + '.\nMissing source paths:\n' + missing.join('\n')
+  };
 }
-verifyClipboard();
-// This helper runs asynchronously; a second read catches immediate clipboard replacements.
-$.NSThread.sleepForTimeInterval(0.25);
-verifyClipboard();
+function writeClipboard() {
+  board.clearContents;
+  if (!board.writeObjects(urls)) throw new Error('Could not write files to the clipboard.');
+}
+writeClipboard();
+var repairs = 0, stableReads = 0;
+while (stableReads < 3) {
+  // Allow asynchronous clipboard consumers to finish before accepting the transfer.
+  $.NSThread.sleepForTimeInterval(0.25);
+  var generation = Number(board.changeCount);
+  var state = inspectClipboard();
+  if (Number(board.changeCount) !== generation)
+    throw new Error('The clipboard changed during verification. Please try again.');
+  if (state.complete) {
+    stableReads++;
+  } else {
+    // Repair only a nonempty subset of our own sources; preserve unrelated content.
+    if (!state.related || repairs >= 2) throw new Error(state.error);
+    repairs++;
+    writeClipboard();
+    stableReads = 0;
+  }
+}
 return 'JG_COPY_OK';
 ]=]
 end
@@ -171,6 +195,9 @@ else
   end
   helper = helper:gsub("var board =", "if (!$.NSFileManager.defaultManager.fileExistsAtPath("
     .. js_path(temporary) .. ")) return '';\nvar board =", 1)
+  helper = helper:gsub("function writeClipboard%(%) {", "function writeClipboard() {\n"
+    .. "if (!$.NSFileManager.defaultManager.fileExistsAtPath(" .. js_path(temporary)
+    .. ")) throw new Error('Clipboard copy was cancelled.');", 1)
   helper = "ObjC.import('Foundation');\nfunction copyFiles() {\n" .. helper .. [[
 }
 var result;
