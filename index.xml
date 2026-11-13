@@ -91,6 +91,10 @@
         <changelog><![CDATA[Include source files from all takes of every selected item, including inactive takes across tracks. Preserve deduplication and section/reverse source resolution.]]></changelog>
         <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
       </version>
+      <version name="1.0.3" author="Julius Gass">
+        <changelog><![CDATA[Read back and verify every native clipboard file path before reporting success. Report incomplete or replaced clipboard contents with expected/actual counts and missing source paths.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/audio-guy/JG_Scripts/main/Tools/JG_Copy_Source_Media_To_Clipboard.lua</source>
+      </version>
     </reapack>
 
     <reapack name="JG_Copy_Timecode_To_Clipboard.lua" type="script" desc="JG Copy Timecode To Clipboard">

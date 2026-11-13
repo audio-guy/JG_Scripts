@@ -1,6 +1,6 @@
 -- @description Copy source media files to clipboard
 -- @author Julius Gass
--- @version 1.0.2
+-- @version 1.0.3
 -- @about
 --   Copies the source files of all takes of selected items to the system clipboard.
 --   Paste in Finder (Cmd+V) or Windows Explorer (Ctrl+V) to copy the files.
@@ -9,7 +9,7 @@
 --   empty items are skipped with a notice. Missing files abort without changing the clipboard.
 --   Supports macOS and Windows using built-in OS helpers; no REAPER extensions needed.
 -- @changelog
---   Include every take of every selected item, including inactive takes across tracks.
+--   Verify clipboard file paths before reporting success; report missing entries.
 
 local TITLE = "Copy source media files to clipboard"
 local function message(text) reaper.ShowMessageBox(text, TITLE, 0) end
@@ -97,6 +97,15 @@ try {
   $effect.Position = 0
   $data.SetData('Preferred DropEffect', $effect)
   [Windows.Forms.Clipboard]::SetDataObject($data, $true, 10, 100)
+  # Re-read the native clipboard rather than assuming a successful write is complete.
+  foreach ($delay in @(0, 250)) {
+    if ($delay) { Start-Sleep -Milliseconds $delay }
+    $actual = [Windows.Forms.Clipboard]::GetFileDropList()
+    $missing = @($files | Where-Object { $actual -notcontains $_ })
+    if ($actual.Count -ne $files.Count -or $missing.Count -gt 0) {
+      throw ("Clipboard verification failed. Expected {0} source file(s); found {1}.`nMissing source paths:`n{2}" -f $files.Count, $actual.Count, ($missing -join "`n"))
+    }
+  }
   'JG_COPY_OK'
 } catch {
   'JG_COPY_ERROR: ' + $_.Exception.Message
@@ -120,6 +129,23 @@ var board = $.NSPasteboard.generalPasteboard;
 if (board.isNil()) throw new Error('The macOS clipboard service is unavailable.');
 board.clearContents;
 if (!board.writeObjects(urls)) throw new Error('Could not write files to the clipboard.');
+function verifyClipboard() {
+  var actual = board.readObjectsForClassesOptions($([$.NSURL]), $({}));
+  var actualCount = actual.isNil() ? 0 : Number(actual.count);
+  var missing = [];
+  for (var i = 0; i < Number(urls.count); i++) {
+    var expected = urls.objectAtIndex(i);
+    if (actual.isNil() || !actual.containsObject(expected))
+      missing.push(ObjC.unwrap(expected.path));
+  }
+  if (actualCount !== Number(urls.count) || missing.length)
+    throw new Error('Clipboard verification failed. Expected ' + urls.count
+      + ' source file(s); found ' + actualCount + '.\nMissing source paths:\n' + missing.join('\n'));
+}
+verifyClipboard();
+// This helper runs asynchronously; a second read catches immediate clipboard replacements.
+$.NSThread.sleepForTimeInterval(0.25);
+verifyClipboard();
 return 'JG_COPY_OK';
 ]=]
 end
@@ -195,10 +221,10 @@ local function poll()
       if result ~= "JG_COPY_OK" then
         message("Could not copy source files to the clipboard.\n\n" .. result)
       elseif skipped > 0 then
-        message(string.format("Copied %d source file(s).\nSkipped %d take(s) or empty item(s) without a source file (including in-project MIDI).", #paths, skipped))
+        message(string.format("Copied %d source file(s). Clipboard contents verified.\nSkipped %d take(s) or empty item(s) without a source file (including in-project MIDI).", #paths, skipped))
       else
         local x, y = reaper.GetMousePosition()
-        reaper.TrackCtl_SetToolTip(string.format("Copied %d unique source file(s) from %d selected item(s).", #paths, count), x + 16, y + 16, true)
+        reaper.TrackCtl_SetToolTip(string.format("Verified %d unique source file(s) in clipboard from %d selected item(s).", #paths, count), x + 16, y + 16, true)
         local hide_at = reaper.time_precise() + 3
         local function hide_tooltip()
           if reaper.time_precise() < hide_at then reaper.defer(hide_tooltip)

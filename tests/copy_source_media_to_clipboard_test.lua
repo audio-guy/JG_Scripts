@@ -94,7 +94,7 @@ messages, calls, helper, tip = run({
   {source = {path = '/tmp/two.wav'}},
 })
 assert(calls == 1 and #messages == 0)
-assert(tip == 'Copied 3 unique source file(s) from 4 selected item(s).')
+assert(tip == 'Verified 3 unique source file(s) in clipboard from 4 selected item(s).')
 local entries = assert(helper:match('var entries = %[(.-)%];'))
 local n = 0
 for _ in entries:gmatch("'[^']+'") do n = n + 1 end
@@ -112,7 +112,7 @@ messages, calls, helper, tip = run({
   }},
 })
 assert(calls == 1 and #messages == 0)
-assert(tip == 'Copied 4 unique source file(s) from 2 selected item(s).')
+assert(tip == 'Verified 4 unique source file(s) in clipboard from 2 selected item(s).')
 entries = assert(helper:match('var entries = %[(.-)%];'))
 n = 0
 for _ in entries:gmatch("'[^']+'") do n = n + 1 end
